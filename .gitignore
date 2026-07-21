@@ -28,3 +28,18 @@
 # ---- Core dumps (scripts enable -fdump-core) ----
 core
 core.*
+
+# ---- SpeedCHEM run outputs written into the mechanism dir (mechdir) ----
+# The interpreter/setup emit these next to chem.inp/therm.dat. Keep only the
+# inputs under test/data/ tracked; ignore everything the run generates there.
+cklink
+chem.bin
+chem.out
+SpeedCHEM.out
+SpeedCHEM.dat
+SCthermo.dat
+dat.cheminp
+dat.cktherm
+dat.mechanism
+dat.janafwarn
+driver_smoke
