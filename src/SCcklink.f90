@@ -67,7 +67,12 @@
       use troepar,      only: todotroe, aT2, uT1T2, T2T2, uT3T2,      &
                               zeroT2
 
-      use reacpar,      only: Arrhreac, Lindreac, Troereac, Revreac
+      use reacpar,      only: Arrhreac, Lindreac, Troereac, Revreac,   &
+                              rate_form, RATE_ARRHENIUS, RATE_PLOG,     &
+                              n_plog_reactions, n_plog_nodes,           &
+                              n_plog_terms,                             &
+                              plog_reaction, plog_node_ptr, plog_logP,  &
+                              plog_term_ptr, plog_A, plog_b, plog_EoverR
 
       use kinetics_mod, only: ip, jp, ir, jr, v_stoich_p, v_stoich_r, &
                               indice_p, indice_r, ijp, ijr,           &
@@ -133,9 +138,17 @@
          fmt_thl1   = "(4(1X,1PE21.12))",                             &
          fmt_sri    = "(' ',I3,' SRI reactions not supported.')",     &
          fmt_erfl   = "(' Unrecognized falloff reaction type: ',I3)", &
-         fmt_prec   = "(' Unsupported real data precision ')"
+         fmt_prec   = "(' Unsupported real data precision ')",        &
+         fmt_unsup  = "(' ERROR: ',I5,' reaction(s) use ',A,', which',"//&
+                       "' SpeedCHEM does not evaluate. The CKINTP',"//    &
+                       "' interpreter accepts these keywords but the',"// &
+                       "' rate/Jacobian code ignores them, which would',"//&
+                       "' silently produce a wrong mechanism.',"//        &
+                       "' Aborting.')"
 
-      character(len=80)                            :: ckfile
+!     ckfile receives adjustl(cklink)/adjustl(cklin2), which are len=255.
+!     At len=80 long mechdir paths were silently truncated. Match them.
+      character(len=255)                           :: ckfile
       character(len=16)                            :: ckvers, ckprec
       character(len=16), dimension(:), allocatable :: tmpchar
 
@@ -145,7 +158,18 @@
                  maxtp, nthcf, nipar, nitar, nifar, nrv, nfl, nthb,   &
                  nlt, nrl, nw, nchrg, max_nreacs, max_nprods
 !ck2015 for real stoichometric coefficients
-      integer :: nei,nja, njan, nf1, nif1, nex, nsto
+!     nei=NEIM, nja=NJAR, njan=NJAN, nif1=NF1R, nf1=NFT1, nex=NEXC,
+!     nsto=NRNU, nord=NORD, maxord=MAXORD  (see CKINTP header WRITE order)
+      integer :: nei,nja, njan, nf1, nif1, nex, nsto, nord, maxord
+      real(dp) :: ckmin
+!ck2015 cklink v2 leading record: magic string + integer schema version.
+!     Must match CKINTP's CK_MAGIC/CK_SCHEMA (chemkin_module.f90).
+      character(len=8) :: ck_magic_in
+      integer          :: ck_schema_in
+      character(len=8), parameter :: CK_MAGIC_EXPECT  = 'SCLKv2  '
+      integer,          parameter :: CK_SCHEMA_EXPECT = 2
+!     PLOG section scratch + checksum
+      integer :: plog_chk_in, plog_chk_calc, ipl
 
       logical,          dimension(:)  , allocatable :: reac_cond
 
@@ -211,8 +235,23 @@
       write(lout, fmt_fname)trim(adjustl(ckfile))
       write(lout, *        )
 
+!     Open the linking file for reading. Use action='read'/status='old'
+!     and capture iostat so a missing/unreadable file fails closed with a
+!     message instead of silently proceeding (or creating an empty file,
+!     as status='unknown' without action='read' could).
       open(unit=linc, file = ckfile,  form   = 'unformatted', &
-                                      status = 'unknown'      )
+                                      status = 'old',         &
+                                      action = 'read',        &
+                                      iostat = idummy1        )
+      if (idummy1 /= 0) then
+         write(*   , "(' ERROR: cannot open chemkin linking file: ',A,"//&
+                     "' (iostat=',I0,'). Aborting.')") &
+                     trim(adjustl(ckfile)), idummy1
+         write(lout, "(' ERROR: cannot open chemkin linking file: ',A,"//&
+                     "' (iostat=',I0,'). Aborting.')") &
+                     trim(adjustl(ckfile)), idummy1
+         error stop 1
+      endif
       rewind linc
 
 !     ** PRELIMINARY PROBLEM DIMENSIONS AND DATA ***********************
@@ -220,9 +259,61 @@
 !     Mechanism label
       mechanism = trim(adjustl("Mechanism imported from "//ckfile))
 
+!     ** cklink v2 magic + schema (fail-closed) **********************
+!     CKINTP writes a leading record {magic, schema} before the legacy
+!     {VERS,PREC,KERR} header. This positively identifies the on-disk
+!     format and version, replacing the fragile VERS-string heuristic.
+!     A missing/wrong magic means an old-format or foreign cklink whose
+!     record layout we must not assume -> refuse (regenerate).
+      read (linc, iostat=idummy1) ck_magic_in, ck_schema_in
+      if (idummy1 /= 0) then
+         write(*   , "(' ERROR: cklink is not a SpeedCHEM v2 linking',"//   &
+                     "' file (missing magic record). Regenerate cklink',"//&
+                     "' from chem.inp/therm.dat. Aborting.')")
+         write(lout, "(' ERROR: cklink is not a SpeedCHEM v2 linking',"//   &
+                     "' file (missing magic record). Aborting.')")
+         error stop 1
+      endif
+      if (ck_magic_in /= CK_MAGIC_EXPECT .or.                          &
+          ck_schema_in /= CK_SCHEMA_EXPECT) then
+         write(*   , "(' ERROR: cklink magic/schema mismatch (got [',A,"//&
+                     "'] v',I0,', expected [',A,'] v',I0,'). Regenerate',"//&
+                     "' cklink. Aborting.')") ck_magic_in, ck_schema_in,  &
+                     CK_MAGIC_EXPECT, CK_SCHEMA_EXPECT
+         write(lout, "(' ERROR: cklink magic/schema mismatch (got [',A,"//&
+                     "'] v',I0,', expected [',A,'] v',I0,'). Aborting.')")&
+                     ck_magic_in, ck_schema_in, CK_MAGIC_EXPECT,          &
+                     CK_SCHEMA_EXPECT
+         error stop 1
+      endif
+
 !     File header: Chemkin version, machine precision and check OK
       read (linc) ckvers, ckprec, kerr
       write(lout, fmt_info)ckvers,ckprec
+
+!     ** Fail-closed on a linking file the interpreter flagged as bad ***
+!     CKINTP writes the header (VERS, PREC, KERR) even when the mechanism
+!     input had errors, then STOPs -- leaving a header-only, truncated
+!     cklink behind. Reading past the header here would give a garbled
+!     mechanism, so refuse when KERR is set.
+      if (kerr) then
+         write(*   , "(' ERROR: chemkin linking file reports interpreter',"//&
+                     "' errors (KERR=.true.). Regenerate cklink from',"//     &
+                     "' chem.inp/therm.dat. Aborting.')")
+         write(lout, "(' ERROR: chemkin linking file reports interpreter',"//&
+                     "' errors (KERR=.true.). Regenerate cklink from',"//     &
+                     "' chem.inp/therm.dat. Aborting.')")
+         error stop 1
+      endif
+
+!     ** Inner CHEMKIN version (informational) ***********************
+!     The magic/schema record above is now the authoritative format
+!     gate; ckvers is the inner CHEMKIN-II data version ('3.1'), kept
+!     for the log only.
+      if (trim(adjustl(ckvers)) /= "3.1") then
+         write(lout, "(' NOTE: inner chemkin data version ',A,"//         &
+                     "' (expected 3.1).')") trim(adjustl(ckvers))
+      endif
 
 !     ** Actions depending on data precision ***************************
       if (ckprec(1:6) /= "DOUBLE") then
@@ -253,7 +344,13 @@
       read (linc) liwork, lrwork, lcwork, mm, kk, ii, maxsp, maxtb,   &
                   maxtp, nthcf, nipar, nitar, nifar, nrv, nfl, nthb,  &
 !ck2015                  nlt, nrl, nw, nchrg
-               nlt, nrl, nw, nchrg, nei, nja, njan, nf1, nf1, nex, nsto
+!     Must mirror the CKINTP header WRITE exactly (chemkin_module.f90):
+!       ... NEIM, NJAR, NJAN, NF1R, NFT1, NEXC, NRNU, NORD, MAXORD, CKMIN
+!     The original read collapsed NF1R and NFT1 into one `nf1` and dropped
+!     NORD/MAXORD/CKMIN, so modified species orders (FORD/RORD) could not
+!     even be counted, let alone rejected. nif1=NF1R, nf1=NFT1.
+               nlt, nrl, nw, nchrg, nei, nja, njan, nif1, nf1, nex,   &
+                  nsto, nord, maxord, ckmin
 !     Assign dimensions to speedchem data
       nel = mm
       ns  = kk
@@ -284,6 +381,41 @@
          write(*   , fmt_chrg)
          write(lout, fmt_chrg)
          stop
+      endif
+!     Fail-closed on reaction features that CKINTP parses into cklink but
+!     that this reader/rate code does NOT convert into an evaluated rate
+!     form. Previously these records were silently skipped, so a mechanism
+!     using them would link and integrate while quietly ignoring the
+!     feature. Refuse instead, naming the keyword and reaction count.
+      if (nei > 0) then
+         write(*   , fmt_unsup) nei, 'electron-impact temperature dep. (EIM/TDEP)'
+         write(lout, fmt_unsup) nei, 'electron-impact temperature dep. (EIM/TDEP)'
+         error stop 1
+      endif
+      if (njan > 0) then
+         write(*   , fmt_unsup) njan, 'Jannev-Langer-Evans-Post (JAN)'
+         write(lout, fmt_unsup) njan, 'Jannev-Langer-Evans-Post (JAN)'
+         error stop 1
+      endif
+      if (nf1 > 0) then
+         write(*   , fmt_unsup) nf1, 'fit #1 (FIT1)'
+         write(lout, fmt_unsup) nf1, 'fit #1 (FIT1)'
+         error stop 1
+      endif
+      if (nex > 0) then
+         write(*   , fmt_unsup) nex, 'excitation energy loss (EXCI)'
+         write(lout, fmt_unsup) nex, 'excitation energy loss (EXCI)'
+         error stop 1
+      endif
+      if (nord > 0) then
+         write(*   , fmt_unsup) nord, 'modified species order (FORD/RORD)'
+         write(lout, fmt_unsup) nord, 'modified species order (FORD/RORD)'
+         error stop 1
+      endif
+      if (nsto > 0) then
+         write(*   , fmt_unsup) nsto, 'real (non-integer) stoichiometry (REAL)'
+         write(lout, fmt_unsup) nsto, 'real (non-integer) stoichiometry (REAL)'
+         error stop 1
       endif
 
       if (maxtp /= 3 .or. nthcf /= 5) then
@@ -481,6 +613,18 @@
       end do assign_stoichiometric_coefficients
 !ck2015s for real stoichometric coefficients
       if(nsto > 0) then
+!        FAIL-CLOSED: real (non-integer) stoichiometric coefficients are read
+!        here but the downstream rate/Jacobian code truncates them via int()
+!        (see iv_stoich_p/r assignment below and mass_action in SCmodule),
+!        so they are NOT correctly evaluated. Refuse rather than silently
+!        compute a wrong mechanism.
+         write(*   , "(' ERROR: ',I5,' reactions use real (non-integer)',"// &
+                     "' stoichiometric coefficients, which SpeedCHEM does',"//&
+                     "' not yet evaluate correctly. Aborting.')") nsto
+         write(lout, "(' ERROR: ',I5,' reactions use real (non-integer)',"// &
+                     "' stoichiometric coefficients, which SpeedCHEM does',"//&
+                     "' not yet evaluate correctly. Aborting.')") nsto
+         error stop 1
       allocate( idummy0(nsto), rtmpst(maxsp,nsto) )
          if(nrv > 0) read(linc)
          if(nfl > 0) read(linc)
@@ -495,15 +639,19 @@
          read(linc) ( idummy0(k),  &
                      (rtmpst(j,k), j = 1, maxsp),  &
                                    k = 1, nsto)
+!        NOTE: rtmpst is packed as (maxsp, nsto); its 2nd index is the packed
+!        record index i (1..nsto), NOT the global reaction number k. The
+!        original code indexed rtmpst(j,k) with k=idummy0(i), which reads the
+!        wrong record and can go out of bounds when k>nsto. Fixed to (j,i).
       assign_real_stoichiometric_coefficients: do i = 1, nsto
         k = idummy0(i)
         do j = 1, maxsp
 !          A reactant is present
-           if (rtmpst(j,k) < 0) then
-               call add_value(stoich_r_sp,k,itmpsp(j,k),-rtmpst(j,k))
+           if (rtmpst(j,i) < 0) then
+               call add_value(stoich_r_sp,k,itmpsp(j,k),-rtmpst(j,i))
 !          A product is present
-           elseif (rtmpst(j,k) > 0) then
-              call add_value(stoich_p_sp,k,itmpsp(j,k), rtmpst(j,k))
+           elseif (rtmpst(j,i) > 0) then
+              call add_value(stoich_p_sp,k,itmpsp(j,k), rtmpst(j,i))
            endif
         end do
       end do assign_real_stoichiometric_coefficients
@@ -785,6 +933,112 @@
            deallocate(ire, inthb, itmpsp, tmpmol)
 
        endif third_body_data
+
+!      ** cklink v2 PLOG SECTION (fail-closed on truncation) ***********
+!      Positioned here because every unsupported optional section
+!      (LAN/RLT/WL/EIM/JAN/FT1/EXC/RNU/ORD) is rejected earlier with
+!      error stop, so for any mechanism that reaches this point only
+!      REV/FAL/THB were written and consumed above -- the file is now at
+!      the PLOG counts record (see CKINTP write order). Layout:
+!        counts -> [reaction map] -> [node arrays] -> checksum.
+       read(linc, iostat=idummy1) n_plog_reactions, n_plog_nodes
+       if (idummy1 /= 0) then
+          write(*   , "(' ERROR: cklink v2 PLOG section missing/truncated',"//&
+                      "' (counts record). Regenerate cklink. Aborting.')")
+          write(lout, "(' ERROR: cklink v2 PLOG section missing/truncated',"//&
+                      "' (counts record). Aborting.')")
+          error stop 1
+       endif
+       n_plog_terms = n_plog_nodes   ! strict_chemkin: one term per node
+
+!      Defensive: make SCcklink re-entrant (a second call in the same
+!      process must not hit "already allocated").
+       if (allocated(plog_reaction))  deallocate(plog_reaction)
+       if (allocated(plog_node_ptr))  deallocate(plog_node_ptr)
+       if (allocated(plog_term_ptr))  deallocate(plog_term_ptr)
+       if (allocated(plog_logP))      deallocate(plog_logP)
+       if (allocated(plog_A))         deallocate(plog_A)
+       if (allocated(plog_b))         deallocate(plog_b)
+       if (allocated(plog_EoverR))    deallocate(plog_EoverR)
+
+       if (n_plog_reactions > 0) then
+          allocate(plog_reaction(n_plog_reactions),                    &
+                   plog_node_ptr(0:n_plog_reactions))
+          allocate(plog_logP(n_plog_nodes), plog_A(n_plog_nodes),      &
+                   plog_b(n_plog_nodes), plog_EoverR(n_plog_nodes))
+!         strict: term_ptr(k)=k, one term per node.
+          allocate(plog_term_ptr(0:n_plog_nodes))
+          plog_term_ptr = [(ipl, ipl = 0, n_plog_nodes)]
+
+          read(linc, iostat=idummy1)                                   &
+               (plog_reaction(ipl), ipl = 1, n_plog_reactions)
+          if (idummy1==0) read(linc, iostat=idummy1)                   &
+               (plog_node_ptr(ipl), ipl = 0, n_plog_reactions)
+          if (idummy1==0) read(linc, iostat=idummy1)                   &
+               (plog_logP(ipl),   ipl = 1, n_plog_nodes)
+          if (idummy1==0) read(linc, iostat=idummy1)                   &
+               (plog_A(ipl),      ipl = 1, n_plog_nodes)
+          if (idummy1==0) read(linc, iostat=idummy1)                   &
+               (plog_b(ipl),      ipl = 1, n_plog_nodes)
+          if (idummy1==0) read(linc, iostat=idummy1)                   &
+               (plog_EoverR(ipl), ipl = 1, n_plog_nodes)
+          if (idummy1 /= 0) then
+             write(*   , "(' ERROR: cklink v2 PLOG arrays truncated.',"//  &
+                         "' Regenerate cklink. Aborting.')")
+             write(lout, "(' ERROR: cklink v2 PLOG arrays truncated.',"//  &
+                         "' Aborting.')")
+             error stop 1
+          endif
+       else
+!         No PLOG reactions: leave arrays unallocated (size 0 conceptually).
+          allocate(plog_reaction(0), plog_node_ptr(0:0))
+          plog_node_ptr(0) = 0
+          allocate(plog_logP(0), plog_A(0), plog_b(0), plog_EoverR(0))
+          allocate(plog_term_ptr(0:0)); plog_term_ptr(0) = 0
+       endif
+
+!      Section checksum (matches CKINTP): reactions + nodes + last ptr.
+       read(linc, iostat=idummy1) plog_chk_in
+       if (idummy1 /= 0) then
+          write(*   , "(' ERROR: cklink v2 PLOG checksum record missing.',"//&
+                      "' Regenerate cklink. Aborting.')")
+          write(lout, "(' ERROR: cklink v2 PLOG checksum record missing.')")
+          error stop 1
+       endif
+       plog_chk_calc = n_plog_reactions + n_plog_nodes
+       if (n_plog_reactions > 0)                                       &
+          plog_chk_calc = plog_chk_calc + plog_node_ptr(n_plog_reactions)
+       if (plog_chk_in /= plog_chk_calc) then
+          write(*   , "(' ERROR: cklink v2 PLOG checksum mismatch (got',"//&
+                      "' ',I0,', expected ',I0,'). Corrupt/misaligned',"//&
+                      "' cklink. Aborting.')") plog_chk_in, plog_chk_calc
+          write(lout, "(' ERROR: cklink v2 PLOG checksum mismatch.')")
+          error stop 1
+       endif
+
+!      Build the per-reaction rate-form tag. Legacy code paths still use
+!      Arrhreac/Lindreac/Troereac; rate_form is stage-1 plumbing that
+!      records which reactions are PLOG (RATE_PLOG). It is populated for
+!      every reaction so stage 2+ can dispatch on it. A no-PLOG mechanism
+!      leaves it all-zero and unused, so nothing numeric changes.
+       if (.not. allocated(rate_form)) allocate(rate_form(nr))
+       rate_form = RATE_ARRHENIUS
+       do ipl = 1, n_plog_reactions
+          rate_form(plog_reaction(ipl)) = RATE_PLOG
+       end do
+
+       if (n_plog_reactions > 0) then
+!         Stage 2: PLOG forward rates ARE now evaluated (see
+!         reacpar::plog_kinf_eval, called from mass_action). PLOG is
+!         supported with numeric-Jacobian solvers; the analytic-Jacobian
+!         path does not yet include the pressure derivative (stage 3), so
+!         chemistry_ODE_integrate refuses ...JAC solvers when PLOG is
+!         present. No blanket fail-closed here anymore.
+          write(lout, "(' PLOG: ',I0,' pressure-dependent reaction(s),',"//&
+                      "' ',I0,' pressure node(s) loaded and evaluable',"//  &
+                      "' (cklink v2, numeric-Jacobian solvers).')")         &
+                      n_plog_reactions, n_plog_nodes
+       endif
 
 !      Fix third-body reactions sparse matrix rows
 

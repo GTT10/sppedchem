@@ -1,0 +1,34 @@
+! Minimal PLOG test mechanism for SpeedCHEM cklink v2 (stage 1).
+!
+! Purpose: exercise the PLOG data-plumbing path (parse -> cklink v2 ->
+! read -> packed arrays -> canonical dump). It is NOT meant to be a
+! physically calibrated mechanism; the rates are illustrative. Species
+! and thermo are reused from the bundled PRF therm.dat so no new thermo
+! is needed.
+!
+! One PLOG reaction with three ascending pressure nodes plus two plain
+! Arrhenius reactions, so the linker sees a mix of rate forms and the
+! PLOG reaction index is not 1 (checks the reaction-map packing).
+!
+ELEMENTS
+H O N
+END
+
+SPECIES
+H2 O2 H2O H O OH HO2 H2O2 N2
+END
+
+REACTIONS
+! --- plain Arrhenius (rate_form = ARRHENIUS) ---
+H2 + O2 = OH + OH        1.700E+13   0.00   47780.0
+O + H2  = OH + H         5.060E+04   2.67    6290.0
+
+! --- PLOG reaction (rate_form = PLOG); 3 ascending pressure nodes ---
+H + O2 = HO2             1.000E+12   0.00     500.0
+    PLOG /  0.1   1.000E+11   0.10    300.0 /
+    PLOG /  1.0   1.000E+12   0.00     500.0 /
+    PLOG / 10.0   1.000E+13  -0.10    700.0 /
+
+! --- another plain Arrhenius after the PLOG one ---
+OH + H2 = H2O + H        2.160E+08   1.51    3430.0
+END
