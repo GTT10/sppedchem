@@ -1,55 +1,36 @@
-# SpeedCHEM Library Makefile
+# SpeedCHEM Library Makefile (Intel ifx only)
 #
 # Usage:
-#   make                       # gfortran build -> gfortran/libSpeedCHEM64.a
-#   make FC=mpif90             # MPI gfortran wrapper (treated as gfortran)
-#   make FC=mpiifx             # Intel ifx via MPI wrapper -> ifx/libSpeedCHEM64.a
-#   make COMPILER_TAG=ifx FC=mpiifx
+#   make                       # ifx build -> ifx/libSpeedCHEM64.a
+#   make FC=mpiifx             # explicit (default)
 #
 # Output layout:
-#   $(COMPILER_TAG)/
+#   ifx/
 #     libSpeedCHEM64.a
 #     mod/*.mod
 #     build/*.o
 
-FC ?= gfortran
+# ifx-only. Default to the Intel MPI wrapper. A command-line FC (e.g. `make FC=ifx`)
+# wins; make's built-in default (FC=f77) or an inherited environment FC is ignored.
+ifneq ($(origin FC),command line)
+  FC := mpiifx
+endif
 AR ?= ar
 
-# Decide COMPILER_TAG from FC when not given explicitly.
-ifeq ($(origin COMPILER_TAG),undefined)
-  ifneq (,$(findstring ifx,$(FC)))
-    COMPILER_TAG := ifx
-  else ifneq (,$(findstring ifort,$(FC)))
-    COMPILER_TAG := ifx
-  else
-    COMPILER_TAG := gfortran
-  endif
-endif
-
 SRCDIR    = src
-OUTDIR    = $(COMPILER_TAG)
+OUTDIR    = ifx
 BUILDDIR  = $(OUTDIR)/build
 MODULEDIR = $(OUTDIR)/mod
 BUILDINFO = $(BUILDDIR)/build_flags.env
 LIBNAME   = libSpeedCHEM64.a
 TARGET    = $(OUTDIR)/$(LIBNAME)
 
-# Compiler-specific flags.
-ifeq ($(COMPILER_TAG),ifx)
-  FFLAGS = -c \
-    -extend-source 132 \
-    -module $(MODULEDIR) \
-    -O2
-else
-  FFLAGS = -c \
-    -ffixed-line-length-none \
-    -ffree-line-length-none \
-    -fallow-argument-mismatch \
-    -J$(MODULEDIR) \
-    -O2
-endif
+FFLAGS = -c \
+  -extend-source 132 \
+  -module $(MODULEDIR) \
+  -O2
 
-# Canonical compile order (mirrors scripts/compile_gfort64opt.sh).
+# Canonical compile order (mirrors scripts/ifx.sh).
 # working_precision must come first so .f files that `use working_precision`
 # find the .mod. A strict serial sequence keeps intra-module dependencies
 # satisfied — the Makefile should be invoked with -j1.
@@ -98,8 +79,8 @@ endef
 $(foreach o,$(OBJS),$(eval $(call ORDER_rule,$o)))
 
 $(BUILDINFO): | $(BUILDDIR) $(MODULEDIR)
-	@printf 'FC=%s\nAR=%s\nCOMPILER_TAG=%s\nFFLAGS=%s\nTARGET=%s\n' \
-		"$(FC)" "$(AR)" "$(COMPILER_TAG)" "$(strip $(FFLAGS))" "$(TARGET)" > $@
+	@printf 'FC=%s\nAR=%s\nFFLAGS=%s\nTARGET=%s\n' \
+		"$(FC)" "$(AR)" "$(strip $(FFLAGS))" "$(TARGET)" > $@
 
 # ライブラリ作成
 $(TARGET): $(BUILDINFO) $(BUILDDIR) $(MODULEDIR) $(OBJS)
@@ -121,12 +102,8 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.f90 | $(BUILDDIR) $(MODULEDIR)
 $(BUILDDIR)/%.o: $(SRCDIR)/%.f | $(BUILDDIR) $(MODULEDIR)
 	$(FC) $(FFLAGS) -o $@ $<
 
-# 掃除用（現在の COMPILER_TAG のみ）
+# 掃除用
 clean:
 	rm -rf $(OUTDIR)
 
-# 全コンパイラ成果物を掃除
-distclean:
-	rm -rf gfortran ifx build
-
-.PHONY: all clean distclean
+.PHONY: all clean
