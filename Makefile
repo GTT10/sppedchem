@@ -31,40 +31,39 @@ FFLAGS = -c \
   -O2
 
 # Canonical compile order (mirrors scripts/ifx.sh).
-# working_precision must come first so .f files that `use working_precision`
+# working_precision must come first so modules that `use working_precision`
 # find the .mod. A strict serial sequence keeps intra-module dependencies
 # satisfied — the Makefile should be invoked with -j1.
 SRCS = \
   $(SRCDIR)/working_precision.f90 \
-  $(SRCDIR)/SCutilities.f \
+  $(SRCDIR)/SCutilities.f90 \
   $(SRCDIR)/SCsparse_definitions.f90 \
-  $(SRCDIR)/SCsparse.f \
-  $(SRCDIR)/sparse_MPI.f \
+  $(SRCDIR)/SCsparse.f90 \
+  $(SRCDIR)/sparse_MPI.f90 \
   $(SRCDIR)/dvode_f90_m.f90 \
-  $(SRCDIR)/SCmodule.f \
+  $(SRCDIR)/SCmodule.f90 \
   $(SRCDIR)/chemkin_module.f90 \
   $(SRCDIR)/SCconV.f90 \
-  $(SRCDIR)/SCsetup.f \
-  $(SRCDIR)/SCallocate.f \
+  $(SRCDIR)/SCsetup.f90 \
+  $(SRCDIR)/SCallocate.f90 \
   $(SRCDIR)/SCcklink.f90 \
-  $(SRCDIR)/gam.f \
-  $(SRCDIR)/gamsub.f \
-  $(SRCDIR)/opkdmain.f \
-  $(SRCDIR)/opkda1.f \
-  $(SRCDIR)/opkda2.f \
-  $(SRCDIR)/ddaspk.f \
-  $(SRCDIR)/rodas.f \
-  $(SRCDIR)/vode.f \
-  $(SRCDIR)/MEBDFSO.f \
-  $(SRCDIR)/rowmap.f \
-  $(SRCDIR)/radau5.f \
-  $(SRCDIR)/radaua.f \
+  $(SRCDIR)/gam.f90 \
+  $(SRCDIR)/gamsub.f90 \
+  $(SRCDIR)/opkdmain.f90 \
+  $(SRCDIR)/opkda1.f90 \
+  $(SRCDIR)/opkda2.f90 \
+  $(SRCDIR)/ddaspk.f90 \
+  $(SRCDIR)/rodas.f90 \
+  $(SRCDIR)/vode.f90 \
+  $(SRCDIR)/MEBDFSO.f90 \
+  $(SRCDIR)/rowmap.f90 \
+  $(SRCDIR)/radau5.f90 \
+  $(SRCDIR)/radaua.f90 \
   $(SRCDIR)/radau_sparse.f90 \
   $(SRCDIR)/chemistry_input.f90 \
   $(SRCDIR)/SCbroadcast.f90
 
-OBJS = $(patsubst $(SRCDIR)/%.f90,$(BUILDDIR)/%.o, \
-         $(patsubst $(SRCDIR)/%.f,$(BUILDDIR)/%.o,$(SRCS)))
+OBJS = $(patsubst $(SRCDIR)/%.f90,$(BUILDDIR)/%.o,$(SRCS))
 
 # デフォルトターゲット（$(eval ...) より先に宣言して .DEFAULT_GOAL を確保）
 .DEFAULT_GOAL := all
@@ -96,10 +95,6 @@ $(MODULEDIR):
 
 # コンパイル規則（.f90用）
 $(BUILDDIR)/%.o: $(SRCDIR)/%.f90 | $(BUILDDIR) $(MODULEDIR)
-	$(FC) $(FFLAGS) -o $@ $<
-
-# コンパイル規則（.f用）
-$(BUILDDIR)/%.o: $(SRCDIR)/%.f | $(BUILDDIR) $(MODULEDIR)
 	$(FC) $(FFLAGS) -o $@ $<
 
 # 掃除用
