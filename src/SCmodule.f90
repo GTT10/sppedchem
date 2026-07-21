@@ -3673,6 +3673,55 @@ module reacpar
    &Troereac,&
    &Revreac
 
+!        RATE-FORM CLASSIFICATION *************************************
+!        Per-reaction rate-form tag (cklink v2, stage 1 PLOG plumbing).
+!        rate_form(nr) classifies how each reaction's forward rate
+!        constant is evaluated. Legacy forms keep their existing code
+!        paths (Arrhreac/Lindreac/Troereac); the tag lets new evaluators
+!        (PLOG now, CHEB later) coexist without touching those paths.
+!        A mechanism with no PLOG reactions leaves every entry at
+!        RATE_ARRHENIUS/THREE_BODY/... exactly as before, so the
+!        numeric path is unchanged (PRF stays bit-identical).
+   integer, parameter :: RATE_ARRHENIUS  = 0
+   integer, parameter :: RATE_THREE_BODY = 1
+   integer, parameter :: RATE_LINDEMANN  = 2
+   integer, parameter :: RATE_TROE       = 3
+   integer, parameter :: RATE_PLOG       = 4
+   integer, parameter :: RATE_CHEB       = 5   ! reserved, not yet evaluated
+   integer, dimension(:), allocatable :: rate_form
+
+!        PLOG (pressure-dependent Arrhenius) ***************************
+!        Packed, pointer-indexed storage (NOT a fixed MAXPLOG x IDIM
+!        array — see plan.md "推奨する内部データ構造"). Two levels of
+!        CSR-style pointers:
+!          reaction  -> range of pressure nodes  (plog_node_ptr)
+!          node      -> range of Arrhenius terms (plog_term_ptr)
+!        strict_chemkin dialect keeps exactly one term per node; the
+!        term level exists so permissive_grouped (same-pressure sums)
+!        can be added later without changing the on-disk schema.
+!        Units (deliberately NEW, to avoid disturbing legacy Ainf/binf/
+!        Einf units and PRF bit-identity):
+!          plog_logP     = log(P[Pa])         (input atm -> Pa -> ln)
+!          plog_A        = pre-exponential in SpeedCHEM internal units
+!          plog_b        = temperature exponent
+!          plog_EoverR   = E/R [K]
+   integer                                       :: n_plog_reactions = 0
+   integer                                       :: n_plog_nodes     = 0
+   integer                                       :: n_plog_terms     = 0
+!        plog_reaction(1:n_plog_reactions): global reaction index of each
+!        PLOG reaction (ascending). plog_node_ptr(0:n_plog_reactions):
+!        node range [ptr(r-1)+1 : ptr(r)] for the r-th PLOG reaction.
+   integer, dimension(:), allocatable            :: plog_reaction
+   integer, dimension(:), allocatable            :: plog_node_ptr
+!        plog_logP(1:n_plog_nodes): ln(P[Pa]) per node (ascending within
+!        a reaction). plog_term_ptr(0:n_plog_nodes): term range per node.
+   real (dp)       , dimension(:), allocatable   :: plog_logP
+   integer, dimension(:), allocatable            :: plog_term_ptr
+!        Arrhenius terms, one set per term (strict: one term per node).
+   real (dp)       , dimension(:), allocatable   :: plog_A
+   real (dp)       , dimension(:), allocatable   :: plog_b
+   real (dp)       , dimension(:), allocatable   :: plog_EoverR
+
 !        Storage of equilibrium constants
    real (dp)       , parameter     :: uKc_RTOL=1e-15_dp
    real (dp)       , dimension(:), allocatable   :: store_uKc
@@ -3680,6 +3729,146 @@ module reacpar
 
 
 contains
+
+!        ***************************************************************
+!        ** PLOG (cklink v2) test/inspection helpers                  **
+!        ***************************************************************
+
+!        plog_dump_only(): true when the environment variable
+!        SC_PLOG_DUMP is set (to anything non-empty). In that mode the
+!        PLOG data is parsed, stored and dumpable, but SCcklink does NOT
+!        fail-closed on PLOG presence -- letting a parse/round-trip test
+!        exercise the plumbing without integrating (stage 1). Normal
+!        runs leave it unset, so a PLOG mechanism is refused (no rate
+!        evaluator yet). Removed/repurposed in stage 2.
+   logical function plog_dump_only()
+      implicit none
+      character(len=8) :: val
+      integer :: ln, st
+      call get_environment_variable('SC_PLOG_DUMP', val, ln, st)
+      plog_dump_only = (st == 0 .and. ln > 0)
+   end function plog_dump_only
+
+!        plog_dump_canonical(unit): write the loaded PLOG packed arrays
+!        as canonical text to `unit` (a stable, diff-able format for the
+!        round-trip test: parse -> write cklink -> read -> dump). One
+!        line per node: reaction index, node index within reaction,
+!        ln(P[Pa]), A, b, E/R[K]. Units are exactly the on-disk units.
+   subroutine plog_dump_canonical(unit)
+      implicit none
+      integer, intent(in) :: unit
+      integer :: r, k, node
+      write(unit,'(A)') '# PLOG canonical dump (cklink v2)'
+      write(unit,'(A,I0)') 'n_plog_reactions ', n_plog_reactions
+      write(unit,'(A,I0)') 'n_plog_nodes ', n_plog_nodes
+      if (n_plog_reactions <= 0) return
+      do r = 1, n_plog_reactions
+         do node = plog_node_ptr(r-1)+1, plog_node_ptr(r)
+            k = node - plog_node_ptr(r-1)
+            write(unit,'(I0,1X,I0,3(1X,ES23.15E3),1X,ES23.15E3)')     &
+               plog_reaction(r), k, plog_logP(node), plog_A(node),    &
+               plog_b(node), plog_EoverR(node)
+         end do
+      end do
+   end subroutine plog_dump_canonical
+
+!        ***************************************************************
+!        ** PLOG forward rate constant (stage 2)                      **
+!        ***************************************************************
+!        plog_kinf_eval: overwrite kinf(r) for every PLOG reaction r
+!        with the pressure-interpolated forward rate constant at the
+!        current temperature T = Ta(1) and pressure P_pa [Pa]. Called
+!        from mass_action right after the Arrhenius kinf is formed, so
+!        PLOG reactions replace their (placeholder) Arrhenius value.
+!
+!        Per-node rate:  k_i(T) = A_i * T**b_i * exp(-(E/R)_i / T)
+!                                = A_i * exp(b_i*ln T - (E/R)_i / T)
+!        (units: A_i is the interpreter's pre-exponential, identical to
+!         Ainf, so k_i lands in the same cm-mol-s units as kinf; E/R is
+!         already in K, so no Rcal factor is needed here.)
+!
+!        Interpolation (strict_chemkin, log-linear in ln P):
+!          lnP <= lnP_1        -> k = k_1                 (nearest end)
+!          lnP >= lnP_last     -> k = k_last              (nearest end)
+!          lnP_j <= lnP < lnP_{j+1}:
+!             theta = (lnP - lnP_j)/(lnP_{j+1} - lnP_j)
+!             ln k  = (1-theta) ln k_j + theta ln k_{j+1}
+!        A single-node PLOG reaction is just k_1 at all pressures.
+!        This routine only reads the packed arrays, so it is safe to
+!        call with n_plog_reactions == 0 (does nothing).
+   subroutine plog_kinf_eval(Ta, P_pa, kinf)
+      use working_precision, only: dp
+      implicit none
+      real (dp), dimension(6), intent(in)    :: Ta   ! [T, T2, T3, T4, 1/T, lnT]
+      real (dp),               intent(in)    :: P_pa ! current pressure [Pa]
+      real (dp), dimension(:), intent(inout) :: kinf ! rate constants (nr)
+      integer :: r, ir, j0, j1, nlo, nhi, node
+      real (dp) :: lnP, lnT, uT, theta, lnk, lnk0, lnk1
+
+      if (n_plog_reactions <= 0) return
+
+      lnT = Ta(6)
+      uT  = Ta(5)
+!     Guard against a non-positive pressure (should not happen for a
+!     physical state); fall back to the lowest node by using a very
+!     small ln P.
+      if (P_pa > 0.0_dp) then
+         lnP = log(P_pa)
+      else
+         lnP = -huge(1.0_dp)
+      endif
+
+      do r = 1, n_plog_reactions
+         ir  = plog_reaction(r)
+         nlo = plog_node_ptr(r-1) + 1   ! first node of reaction r
+         nhi = plog_node_ptr(r)         ! last  node of reaction r
+
+         if (nhi <= nlo) then
+!           Single pressure node: pressure-independent Arrhenius at k_1.
+            kinf(ir) = plog_node_rate(nlo, lnT, uT)
+
+         else if (lnP <= plog_logP(nlo)) then
+!           At or below the lowest node -> nearest endpoint (s = 0).
+            kinf(ir) = plog_node_rate(nlo, lnT, uT)
+
+         else if (lnP >= plog_logP(nhi)) then
+!           At or above the highest node -> nearest endpoint (s = 0).
+            kinf(ir) = plog_node_rate(nhi, lnT, uT)
+
+         else
+!           Locate the bracketing interval [j0, j1] with
+!           logP(j0) <= lnP < logP(j1). Right-continuous at a node:
+!           when lnP == logP(node) exactly, the loop stops with j0=node.
+            j0 = nlo
+            do node = nlo, nhi-1
+               if (lnP >= plog_logP(node) .and. lnP < plog_logP(node+1)) then
+                  j0 = node
+                  exit
+               endif
+            end do
+            j1 = j0 + 1
+
+            lnk0  = log(plog_node_rate(j0, lnT, uT))
+            lnk1  = log(plog_node_rate(j1, lnT, uT))
+            theta = (lnP - plog_logP(j0)) /                            &
+                    (plog_logP(j1) - plog_logP(j0))
+            lnk   = (1.0_dp - theta)*lnk0 + theta*lnk1
+            kinf(ir) = exp(lnk)
+         endif
+      end do
+   end subroutine plog_kinf_eval
+
+!        plog_node_rate: Arrhenius rate constant of a single PLOG node.
+!        k = A * exp(b*lnT - (E/R)/T). Separated out so interpolation
+!        and (stage-3) derivatives share exactly one node-rate formula.
+   real (dp) function plog_node_rate(node, lnT, uT)
+      use working_precision, only: dp
+      implicit none
+      integer,   intent(in) :: node
+      real (dp), intent(in) :: lnT, uT
+      plog_node_rate = plog_A(node) *                                  &
+                       exp(plog_b(node)*lnT - plog_EoverR(node)*uT)
+   end function plog_node_rate
 
 !        ***************************************************************
 !        ** Allocate and compute packed reaction indices              **
@@ -4098,13 +4287,21 @@ module kinetics_mod
    real (dp)         :: store_dwdt_T = 0.e0_dp
 
 !     Array for storing reaction rate constants
+!     store_kinf_T seeds to an impossible temperature so the first
+!     retrieve_kinf call never matches uninitialised storage. (These
+!     retrieve_* caches are currently dormant — no active callers — but
+!     the guard keeps them safe if re-enabled.)
    real (dp)       , dimension(:), allocatable :: store_kinf
-   real (dp)                                   :: store_kinf_T
+   real (dp)                                   :: store_kinf_T = -1.0_dp
 
 !     Array for storing mass action productories
    real (dp)       , dimension(:), allocatable, target :: store_qf,&
    &store_qb
    real (dp)       , dimension(:), allocatable :: store_C
+!     True only once store_C/qf/qb hold a real evaluation. Guards against
+!     comparing against just-allocated (uninitialised) storage on the first
+!     call, which could spuriously report a cache hit and return garbage.
+   logical                                     :: store_valid = .false.
 
 
 contains
@@ -4571,7 +4768,8 @@ contains
       use reacpar,             only: troereac, Lindreac, uequilC,&
       &n_tb_beta,tb_beta_pack,&
       &nEQREV,iEQREV,nXREV,iXREV,&
-      &is_beta_pack
+      &is_beta_pack,&
+      &n_plog_reactions, plog_kinf_eval
       use SCmixturethermo,     only: SCP, SCrho
       use SCthermodata,        only: interp4_coefs, use_table
       use sparse_chemistry,    only: nudiffT_sparse, tb_beta_sp,&
@@ -4642,6 +4840,15 @@ contains
          call reaction_rates(Ta, k0, kinf, iT, frac)
          if (ntbTROE>0)log10Fcent = troe_logfac(Ta,iT,frac)
       endif
+
+!     ** PLOG (pressure-dependent Arrhenius) forward rates ************
+!     Override kinf(r) for each PLOG reaction with the pressure-
+!     interpolated value at the current state pressure SCP [Pa]. This
+!     is a no-op when the mechanism has no PLOG reactions, so non-PLOG
+!     mechanisms are numerically unchanged. PLOG reactions carry no
+!     falloff data, so overriding kinf here (before kf and the falloff
+!     Pr terms) is safe. (stage 2)
+      if (n_plog_reactions>0) call plog_kinf_eval(Ta, SCP, kinf)
 
 !     ** Compute forward reaction rates *******************************
       kf = kinf
@@ -4807,14 +5014,25 @@ contains
          if (.not.allocated(store_qf))allocate(store_qf(nr))
          if (.not.allocated(store_qb))allocate(store_qb(nr))
 
-         out_of_tolerance = .false.
-
-         check_tolerance: do i = 1, ns
-            if (abs(1.e0_dp - C(i)*store_C(i)) > micro) then
-               out_of_tolerance = .true.
-               exit check_tolerance
-            endif
-         end do check_tolerance
+!        Force a full evaluation until the store holds real data. Without
+!        this, the first call compares C against uninitialised store_C and
+!        could report a spurious hit, returning uninitialised store_qf/qb.
+         if (.not. store_valid) then
+            out_of_tolerance = .true.
+         else
+            out_of_tolerance = .false.
+            check_tolerance: do i = 1, ns
+!              store_C holds 1/C_prev, so C(i)*store_C(i) ~ C/C_prev. NB a
+!              previous zero concentration stored Inf here; C*Inf feeds a
+!              NaN which fails this test (NaN>micro is .false.) and would
+!              wrongly reuse the cache. The store_valid guard covers the
+!              first call; a fuller fix would store C (not 1/C) directly.
+               if (abs(1.e0_dp - C(i)*store_C(i)) > micro) then
+                  out_of_tolerance = .true.
+                  exit check_tolerance
+               endif
+            end do check_tolerance
+         endif
 
       else
 
@@ -4864,6 +5082,7 @@ contains
             store_C  = one/C
             store_qf = qf
             store_qb = qb
+            store_valid = .true.
          endif
 
       else

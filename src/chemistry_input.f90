@@ -49,7 +49,7 @@
       subroutine chemistry_ODE_integrate(neq,rtol,atol,t0,tf,yin)
 
       use working_precision,      only: dp
-      use speedchem,              only: nr, njac,                    &
+      use speedchem,              only: nr, njac, ns,                &
                                         species_permutations,        &
                                         species_inverse_permutations
       use ode_solver,             only: rwork, iwork, ncJAC, ncCONV, &
@@ -62,6 +62,7 @@
                                         mlmas, idfx, daspkinfo, maxk
       use chemistry_setup,        only: solver, permutate_species,   &
                                         accurate_scthermo
+      use reacpar,                only: n_plog_reactions
       use sparse_chemistry,       only: JAC_sparse, JACT_sparse
       use dvode_f90_m,            only: dvode_f90, vode_opts,    &
                                         USERSETS_IAJA, set_opts, &
@@ -87,6 +88,10 @@
 
       real (dp), dimension(neq) :: yin0, yprime
       real (dp)                 :: rpar, rto2, h0, t00
+!     Saved initial time so a retry restarts from the original t0. Most
+!     solvers take t0 as intent(inout) and advance it, so without this the
+!     next attempt would integrate a shorter interval [advanced_t0, tf].
+      real (dp)                 :: t0_init
       integer                   :: ipar, it, ierr
 	  integer, parameter        :: nit = 5
 	  integer, dimension(20)    :: info
@@ -100,6 +105,37 @@
 	   fmt_time  = "(' Warning: integration time is not positive ')"
 
 
+
+!     State-vector contract check. The unknown array is
+!         yin(1)      = T [K]
+!         yin(2:neq)  = species mass fractions Y_1..Y_ns [-]   (NOT molar
+!                       concentrations; see SC_conV in SCconV.f90)
+!     so neq must be exactly ns+1. A mismatch means the caller sized the
+!     state wrong; integrating anyway would read/write out of bounds or
+!     silently drop a species, so refuse up front.
+      if (neq /= ns + 1) then
+         write(*,"(' ERROR chemistry_ODE_integrate: neq (',I0,') /= ns+1"//&
+                  " (',I0,'). The state must be [T, Y_1..Y_ns].')") neq, ns+1
+         error stop 1
+      endif
+
+!     PLOG + analytic Jacobian guard (stage 2 = numeric Jacobian only).
+!     PLOG forward rates ARE evaluated in the RHS (mass_action), so
+!     numeric-Jacobian solvers integrate PLOG correctly. The analytic
+!     Jacobian (constV_jac_sparse) does NOT yet include the PLOG
+!     temperature/pressure derivative (stage 3), so a "...JAC" solver
+!     would silently use a wrong Jacobian. Refuse rather than integrate
+!     with an inconsistent Jacobian. (The check is on the solver name
+!     containing "JAC"; the numeric sparse "...S" solvers are fine.)
+      if (n_plog_reactions > 0 .and. index(solver, "JAC") > 0) then
+         write(*,"(' ERROR chemistry_ODE_integrate: solver ',A,' uses the"//&
+                  " analytic Jacobian, but ',I0,' PLOG reaction(s) are"//    &
+                  " present and the analytic PLOG Jacobian is not"//         &
+                  " implemented yet (stage 3). Use a numeric-Jacobian"//     &
+                  " solver (e.g. LSODES/VODE without the JAC suffix).')")     &
+                  trim(solver), n_plog_reactions
+         error stop 1
+      endif
 
 !     Initialization
       istate = 1
@@ -119,6 +155,9 @@
          yin0          = yin
       endif
 
+!     Save the initial time so each retry can restart the interval from it
+      t0_init = t0
+
 	  it     = 0
 
 !     If the first integration fails, temperature tabulation is suppressed
@@ -129,6 +168,7 @@
 	  integration_attempts: do while (it < nit .and. istate<2)
 
 	     yin     = yin0
+		 t0      = t0_init
 		 it      = it + 1
 		 istate  = 1
 		 rto2    = rtol * ten**(it-1)
