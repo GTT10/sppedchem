@@ -1,5 +1,4 @@
-# ---- Build output (per-compiler dirs produced by Makefile / scripts) ----
-/gfortran/
+# ---- Build output (produced by Makefile / scripts) ----
 /ifx/
 /build/
 

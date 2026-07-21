@@ -4,23 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-SpeedCHEM is a Fortran library for chemical-kinetics ODE/DAE problems (combustion chemistry). The build produces a static archive `libSpeedCHEM64.a` — there is no executable or main program here; this repo is a *library* that a host application links against. Original author: Federico Perini (GPLv3), circa 2010–2013; this tree adds a modern Makefile, `fpm.toml`, and dual gfortran/Intel-ifx build support.
+SpeedCHEM is a Fortran library for chemical-kinetics ODE/DAE problems (combustion chemistry). The build produces a static archive `libSpeedCHEM64.a` — there is no executable or main program here; this repo is a *library* that a host application links against. Original author: Federico Perini (GPLv3), circa 2010–2013. **This tree targets Intel ifx only**, built via the MPI wrapper `mpiifx`.
 
 ## Building
 
-The library is built two ways depending on the compiler. Output is segregated per compiler under `gfortran/` or `ifx/` (`<tag>/libSpeedCHEM64.a`, `<tag>/mod/*.mod`, `<tag>/build/*.o`).
+Output goes under `ifx/` (`ifx/libSpeedCHEM64.a`, `ifx/mod/*.mod`, `ifx/build/*.o`).
 
 ```bash
-make                       # gfortran -> gfortran/libSpeedCHEM64.a
-make FC=mpif90             # MPI gfortran wrapper (still tagged 'gfortran')
-make FC=mpiifx             # Intel ifx via MPI wrapper -> ifx/libSpeedCHEM64.a
-make clean                 # remove only the current COMPILER_TAG output dir
-make distclean             # remove gfortran/ ifx/ build/
+make                       # -> ifx/libSpeedCHEM64.a  (FC defaults to mpiifx)
+make FC=mpiifx             # explicit (same as default)
+make clean                 # remove the ifx/ output dir
 ```
 
-`COMPILER_TAG` is auto-derived from `FC` (anything containing `ifx`/`ifort` → `ifx`, else `gfortran`) and can be overridden: `make COMPILER_TAG=ifx FC=mpiifx`.
-
-Alternative standalone build scripts (do the same compile without make): `scripts/compile_gfort64opt.sh` (gfortran) and `scripts/ifx.sh` (mpiifx). These use `-O3 -g` with debug/backtrace flags; the Makefile uses `-O2`.
+Alternative standalone build script (same compile without make): `scripts/ifx.sh`. It uses `-O3 -g` with debug/backtrace flags; the Makefile uses `-O2`.
 
 An `fpm.toml` exists but the Makefile/scripts are the canonical build. `fpm` is risky here: it auto-globs `src/` and would try to compile `radau5s.f`, which is deliberately excluded from the real build (see below).
 
@@ -29,34 +25,32 @@ An `fpm.toml` exists but the Makefile/scripts are the canonical build. `fpm` is 
 There is one end-to-end smoke test that drives the whole pipeline and gates on the result. Since the repo is a library with no main program, the test provides its own driver.
 
 ```bash
-scripts/run_tests.sh            # ifx (default) — matches the ifx-first policy
-scripts/run_tests.sh gfortran   # gfortran
+scripts/run_tests.sh                             # build + smoke test (test/data/)
 SC_MECHDIR=/path/to/data/ scripts/run_tests.sh   # run against a different mechanism dir
 ```
 
-`run_tests.sh` builds `libSpeedCHEM64.a`, compiles+links [test/driver_smoke.f90](test/driver_smoke.f90) via the MPI wrapper (mpiifx/mpif90 — the library uses MPI in `sparse_MPI.f`/`SCbroadcast.f90`, though the driver itself never calls `MPI_INIT`), runs it, and exits non-zero on failure.
+`run_tests.sh` builds `libSpeedCHEM64.a`, compiles+links [test/driver_smoke.f90](test/driver_smoke.f90) via the MPI wrapper `mpiifx` (the library uses MPI in `sparse_MPI.f`/`SCbroadcast.f90`, though the driver itself never calls `MPI_INIT`), runs it, and exits non-zero on failure.
 
-What the driver does: sets `mechdir`, calls `chemistry_input` (the full setup orchestrator: CKINTP → cklink → SCcklink → sparse setup → `ODE_solver_speedchem_init`), seeds a **hot stoichiometric n-hexadecane/air state** (looked up by species name via the public `specie`/`ns` from `speedchem`), integrates constant-volume with `chemistry_ODE_integrate`, and asserts the solution is finite **and the temperature rose >100 K (autoignition)**. Baseline: the bundled mechanism links to 51 species / 153 reactions and ignites 1400 K → ~1798 K, bit-identical on ifx and gfortran.
+What the driver does: sets `mechdir`, calls `chemistry_input` (the full setup orchestrator: CKINTP → cklink → SCcklink → sparse setup → `ODE_solver_speedchem_init`), seeds a **hot stoichiometric n-hexadecane/air state** (looked up by species name via the public `specie`/`ns` from `speedchem`), integrates constant-volume with `chemistry_ODE_integrate`, and asserts the solution is finite **and the temperature rose >100 K (autoignition)**. Baseline: the bundled mechanism links to 51 species / 153 reactions and ignites 1400 K → ~1798 K.
 
 Test mechanism lives in [test/data/](test/data/) (`chem.inp` = a 51-species PRF n-hexadecane/iso-cetane skeletal mechanism, `therm.dat`). Only those two inputs are tracked; the run writes `cklink`, `SpeedCHEM.out`, `chem.out`, `dat.*` etc. into that dir and they are gitignored. Use this test as the regression gate for any refactor.
 
 ### Critical: compile order is fixed and must not change
 
-The source files have inter-module dependencies but there is **no dependency-graph build** — modules are compiled in one hard-coded serial order. This exact order is duplicated in three places and must be kept in sync: the `SRCS` list in [Makefile](Makefile), `scripts/compile_gfort64opt.sh`, and `scripts/ifx.sh`. Key constraints:
+The source files have inter-module dependencies but there is **no dependency-graph build** — modules are compiled in one hard-coded serial order. This exact order is duplicated in two places and must be kept in sync: the `SRCS` list in [Makefile](Makefile) and `scripts/ifx.sh`. Key constraints:
 
 - `working_precision.f90` **must** be first (every other module `use`s it).
 - The Makefile builds strictly serially even under `-j` (it chains each `.o` as a prerequisite of the next); do not "parallelize" it by removing that chain.
 
 ### Compiler flags that matter
 
-- **`-fconvert=big-endian` (gfortran) / `-convert big_endian` (ifx)**: the library reads/writes big-endian binary data. Changing this breaks I/O compatibility with data files.
-- **`-fallow-argument-mismatch`** (gfortran) is required — legacy solver code (LSODE/VODE families, etc.) passes mismatched argument types; without it the build fails. ifx generally does not need an equivalent.
-- Fixed-form files (`.f`) use extended line length (`-ffixed-line-length-none` / `-extend-source 132`).
-- `.f` = fixed-form legacy solvers/utilities; `.f90` = free-form (mostly the newer SpeedCHEM-authored modules).
+- **`-convert big_endian`** (in `scripts/ifx.sh`): the library reads/writes big-endian binary data. Changing this breaks I/O compatibility with data files. (The Makefile currently omits this — see note below.)
+- **`-extend-source 132`**: fixed-form files (`.f`) exceed 72 columns; without it they fail to compile.
+- `.f` = fixed-form legacy solvers/utilities; `.f90` = free-form (mostly the newer SpeedCHEM-authored modules). ifx tolerates the legacy argument-type mismatches in the LSODE/VODE solver families without a special flag.
 
 ### Encoding gotcha
 
-Several `.f`/`.f90` files are **ISO-8859 / extended-ASCII, not UTF-8** (e.g. `SCconV.f90`, `SCutilities.f`). Plain `grep -E` may silently fail to match inside them — use `grep -a` when searching source. Do not "fix" the encoding blindly; the compilers accept these files.
+Several `.f`/`.f90` files are **ISO-8859 / extended-ASCII, not UTF-8** (e.g. `SCconV.f90`, `SCutilities.f`). Plain `grep -E` may silently fail to match inside them — use `grep -a` when searching source. Do not "fix" the encoding blindly; ifx accepts these files.
 
 ## Architecture
 
@@ -95,10 +89,10 @@ The most important thing to know: **module names do not match file names**, and 
 
 ### MPI
 
-MPI is used only in `sparse_MPI.f` and `SCbroadcast.f90` (broadcasting the parsed mechanism / sparse structures to worker ranks). Building with a plain compiler (`gfortran`) still works; the MPI paths compile because the wrappers (`mpif90`/`mpiifx`) provide `mpif.h`. The gfortran script auto-detects the MPI include dir (`MPIHOME`, or via `mpif90 -showme`).
+MPI is used only in `sparse_MPI.f` and `SCbroadcast.f90` (broadcasting the parsed mechanism / sparse structures to worker ranks). Everything is built through the MPI wrapper `mpiifx`, which supplies `mpif.h`; the smoke-test driver never calls `MPI_INIT` and runs single-process.
 
 ### Files present but not built
 
 - `radau5s.f` — a sparse RADAU5 variant, **not** in any build list (superseded by `radau_sparse.f90`). Do not add it to the compile order.
 - `gamparam.dat` — an `INCLUDE`d parameter file for `gamsub.f`, not compiled directly.
-- `scripts/Makefile`, `scripts/compile_gfort*.bat`, `scripts/SC_gather_results.m` — legacy/aux (old in-tree Makefile fragment, Windows batch builds, a MATLAB results-gathering script). The top-level `Makefile` supersedes `scripts/Makefile`.
+- `scripts/Makefile`, `scripts/SC_gather_results.m` — legacy/aux (old in-tree Makefile fragment; a MATLAB results-gathering script). The top-level `Makefile` supersedes `scripts/Makefile`.

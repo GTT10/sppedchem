@@ -17,16 +17,15 @@ mkdir -p "$MODULEDIR"
 FCFLAGS=(
   -c
   -m64
-  -extend-source 132         # -ffixed-line-length-none の代替
-  -convert big_endian        # -fconvert=big-endian の代替
-  -warn uninitialized        # -Wuninitialized の代替
+  -extend-source 132         # 固定形式の行長制限を緩和
+  -convert big_endian        # ビッグエンディアンのバイナリ入出力
+  -warn uninitialized        # 未初期化変数の警告
   -g                         # フルデバッグシンボル
   -O3                        # 最適化レベル3
   -xHost                     # 実行ホストのCPUアーキテクチャへの最適化(推奨)
   -fno-omit-frame-pointer
-  -traceback                 # -fbacktrace の代替
-  -module "$MODULEDIR"       # -J の代替
-  # -fallow-argument-mismatch に相当するオプションはifxでは通常不要である.
+  -traceback                 # 実行時エラーでバックトレース
+  -module "$MODULEDIR"       # モジュール(.mod)出力先
   # 厳密な型チェックでエラーが出る場合は -diag-disable=8284 等で個別に警告を抑止する.
 )
 
@@ -64,7 +63,6 @@ rm -f "$SCLIB" ./*.mod
 printf 'Compiling to generate %s...\n' "$SCLIB"
 
 {
-  # gfortranの代わりにmpiifxを使用する
   mpiifx "${FCFLAGS[@]}" -c "${SRCS[@]}"
   ar cr "$SCLIB" ./*.o
   ranlib "$SCLIB"
