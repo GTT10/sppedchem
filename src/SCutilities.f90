@@ -34,111 +34,111 @@
 !   **                                                                                           **
 !   ***********************************************************************************************
 
-c     *****************************************************************
-c     **                                                             **
-c     **                     SpeedCHEM FORTRAN                       **
-c     **                                                             **
-c     **                  Functions and utilities                    **
-c     **                                                             **
-c     **   Author:      Federico Perini                              **
-c     **   Date created: tuesday, 25/05/2010                         **
-c     **   Last update : tuesday, 31/07/2012                         **
-c     **                                                             **
-c     *****************************************************************
+!     *****************************************************************
+!     **                                                             **
+!     **                     SpeedCHEM FORTRAN                       **
+!     **                                                             **
+!     **                  Functions and utilities                    **
+!     **                                                             **
+!     **   Author:      Federico Perini                              **
+!     **   Date created: tuesday, 25/05/2010                         **
+!     **   Last update : tuesday, 31/07/2012                         **
+!     **                                                             **
+!     *****************************************************************
 
-      module utilities
+module utilities
 
-      use working_precision
+   use working_precision
 
-      implicit none
-      private
+   implicit none
+   private
 
-      ! ****************************************************************
-      ! ** ROUTINES CALLABLE FROM PRESENT MODULE                      **
-      ! ****************************************************************
+   ! ****************************************************************
+   ! ** ROUTINES CALLABLE FROM PRESENT MODULE                      **
+   ! ****************************************************************
 
-      ! Compute relative error between two values/array/matrices
-      ! function: relative_error(A,B)
-      public :: relative_error
+   ! Compute relative error between two values/array/matrices
+   ! function: relative_error(A,B)
+   public :: relative_error
 
-      ! Sort arrays in ascending order using quicksort algorithm
-      ! subroutine: call sort(A)
-      public :: sort
+   ! Sort arrays in ascending order using quicksort algorithm
+   ! subroutine: call sort(A)
+   public :: sort
 
-      ! Allocate/Rellocate an array with new dimensions
-      ! subroutine: call force_allocate(A, dim1)
-      !             call force_allocate(A, dim1, dim2)
-      public :: force_allocate
-      public :: extend
+   ! Allocate/Rellocate an array with new dimensions
+   ! subroutine: call force_allocate(A, dim1)
+   !             call force_allocate(A, dim1, dim2)
+   public :: force_allocate
+   public :: extend
 
-      ! Extend/shrink an array's dimensions keeping the contained
-      ! data possible in the new shape
-      ! subroutine: call change_size(A, dim1)
-      public :: change_size
+   ! Extend/shrink an array's dimensions keeping the contained
+   ! data possible in the new shape
+   ! subroutine: call change_size(A, dim1)
+   public :: change_size
 
-      ! Detect NaN or Inf values in arrays
+   ! Detect NaN or Inf values in arrays
 !      public :: isnan
 
-      ! Convert integer into string of given length, with
-      ! leading zeros
-      public :: int_to_string
-      public :: find_string_in_array, find_stringi_in_array
+   ! Convert integer into string of given length, with
+   ! leading zeros
+   public :: int_to_string
+   public :: find_string_in_array, find_stringi_in_array
 
-      ! ****************************************************************
-      ! ** RELATIVE ERROR                                             **
-      ! ****************************************************************
-      interface relative_error
-        module procedure dble_relative_error
-        module procedure int_relative_error
-      end interface relative_error
+   ! ****************************************************************
+   ! ** RELATIVE ERROR                                             **
+   ! ****************************************************************
+   interface relative_error
+      module procedure dble_relative_error
+      module procedure int_relative_error
+   end interface relative_error
 
-      ! ****************************************************************
-      ! ** QUICK SORT                                                 **
-      ! ****************************************************************
-      interface sort
-        module procedure double_quick_sort
-        module procedure int_quick_sort
-      end interface sort
+   ! ****************************************************************
+   ! ** QUICK SORT                                                 **
+   ! ****************************************************************
+   interface sort
+      module procedure double_quick_sort
+      module procedure int_quick_sort
+   end interface sort
 
-      ! ****************************************************************
-      ! ** ALLOCATION AND REALLOCATION OF ARRAYS                      **
-      ! ****************************************************************
-      interface force_allocate
-        module procedure reallocate_double_array
-        module procedure reallocate_double_matrix
-        module procedure reallocate_int_array
-        module procedure reallocate_int_matrix
-      end interface force_allocate
+   ! ****************************************************************
+   ! ** ALLOCATION AND REALLOCATION OF ARRAYS                      **
+   ! ****************************************************************
+   interface force_allocate
+      module procedure reallocate_double_array
+      module procedure reallocate_double_matrix
+      module procedure reallocate_int_array
+      module procedure reallocate_int_matrix
+   end interface force_allocate
 
-      interface force_deallocate
-        module procedure deallocate_double_array
-        module procedure deallocate_double_matrix
-        module procedure deallocate_int_array
-        module procedure deallocate_int_matrix
-      end interface force_deallocate
+   interface force_deallocate
+      module procedure deallocate_double_array
+      module procedure deallocate_double_matrix
+      module procedure deallocate_int_array
+      module procedure deallocate_int_matrix
+   end interface force_deallocate
 
-      interface extend
-        module procedure extend_double_array
-        module procedure extend_char_array
-        module procedure extend_double_matrix
-        module procedure extend_int_array
-      end interface extend
+   interface extend
+      module procedure extend_double_array
+      module procedure extend_char_array
+      module procedure extend_double_matrix
+      module procedure extend_int_array
+   end interface extend
 
-      interface change_size
-        module procedure change_size_double_array
-        module procedure change_size_int_array
-      end interface change_size
-
-
-      ! ****************************************************************
-      ! ****************************************************************
-      contains
+   interface change_size
+      module procedure change_size_double_array
+      module procedure change_size_int_array
+   end interface change_size
 
 
-      ! ****************************************************************
-      ! ** Relative and absolute error                                **
-      ! ****************************************************************
-      elemental function dble_relative_error(a,b) result(epsi)
+   ! ****************************************************************
+   ! ****************************************************************
+contains
+
+
+   ! ****************************************************************
+   ! ** Relative and absolute error                                **
+   ! ****************************************************************
+   elemental function dble_relative_error(a,b) result(epsi)
       implicit none
 
       real (dp)       , intent(in) :: a, b
@@ -146,19 +146,19 @@ c     *****************************************************************
 
       denominator_case: if (b == 0.e0_dp) then
 
-                           if (a==0.e0_dp) then
-                              epsi = 0.e0_dp
-                           else
-                              epsi = huge(0.e0_dp)
-                           endif
+         if (a==0.e0_dp) then
+            epsi = 0.e0_dp
+         else
+            epsi = huge(0.e0_dp)
+         endif
 
-                        else
-                           epsi = abs(a-b)/b
-                        endif denominator_case
+      else
+         epsi = abs(a-b)/b
+      endif denominator_case
 
-      end function dble_relative_error
+   end function dble_relative_error
 
-      elemental function int_relative_error(a,b) result(epsi)
+   elemental function int_relative_error(a,b) result(epsi)
       implicit none
 
       integer,          intent(in) :: a, b
@@ -166,22 +166,22 @@ c     *****************************************************************
 
       denominator_case: if (b == 0) then
 
-                           if (a==0) then
-                              epsi = 0.e0_dp
-                           else
-                              epsi = huge(0.e0_dp)
-                           endif
+         if (a==0) then
+            epsi = 0.e0_dp
+         else
+            epsi = huge(0.e0_dp)
+         endif
 
-                        else
-                           epsi = abs(real(a-b, dp))/real(b, dp)
-                        endif denominator_case
+      else
+         epsi = abs(real(a-b, dp))/real(b, dp)
+      endif denominator_case
 
-      end function int_relative_error
+   end function int_relative_error
 
 !     ******************************************************************
 !     ** ALLOCATION and REALLOCATION                                  **
 !     ******************************************************************
-      subroutine reallocate_double_array(A,dim)
+   subroutine reallocate_double_array(A,dim)
       implicit none
 
       real (dp)       , dimension(:), allocatable, intent(inout) :: A
@@ -195,22 +195,22 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A) /= dim) then
-           deallocate(A)
-           allocate(A(dim))
-        endif change_needed
+         ! Check for current array size
+         change_needed: if (size(A) /= dim) then
+            deallocate(A)
+            allocate(A(dim))
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim))
+         ! Allocate array for sure
+         allocate(A(dim))
 
       endif allocation_state
 
-      end subroutine reallocate_double_array
+   end subroutine reallocate_double_array
 
-      subroutine reallocate_int_array(A,dim)
+   subroutine reallocate_int_array(A,dim)
       implicit none
 
       integer, dimension(:), allocatable, intent(inout) :: A
@@ -224,22 +224,22 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A) /= dim) then
-           deallocate(A)
-           allocate(A(dim))
-        endif change_needed
+         ! Check for current array size
+         change_needed: if (size(A) /= dim) then
+            deallocate(A)
+            allocate(A(dim))
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim))
+         ! Allocate array for sure
+         allocate(A(dim))
 
       endif allocation_state
 
-      end subroutine reallocate_int_array
+   end subroutine reallocate_int_array
 
-      subroutine reallocate_double_matrix(A,dim1,dim2)
+   subroutine reallocate_double_matrix(A,dim1,dim2)
       implicit none
 
       real (dp)       , dimension(:,:), allocatable, intent(inout) :: A
@@ -253,22 +253,22 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A,1) /= dim1 .or. size(A,2)/=dim2) then
-           deallocate(A)
-           allocate(A(dim1,dim2))
-        endif change_needed
+         ! Check for current array size
+         change_needed: if (size(A,1) /= dim1 .or. size(A,2)/=dim2) then
+            deallocate(A)
+            allocate(A(dim1,dim2))
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim1,dim2))
+         ! Allocate array for sure
+         allocate(A(dim1,dim2))
 
       endif allocation_state
 
-      end subroutine reallocate_double_matrix
+   end subroutine reallocate_double_matrix
 
-      subroutine reallocate_int_matrix(A,dim1,dim2)
+   subroutine reallocate_int_matrix(A,dim1,dim2)
       implicit none
 
       integer, dimension(:,:), allocatable, intent(inout) :: A
@@ -282,26 +282,26 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A,1) /= dim1 .or. size(A,2)/=dim2) then
-           deallocate(A)
-           allocate(A(dim1,dim2))
-        endif change_needed
+         ! Check for current array size
+         change_needed: if (size(A,1) /= dim1 .or. size(A,2)/=dim2) then
+            deallocate(A)
+            allocate(A(dim1,dim2))
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim1,dim2))
+         ! Allocate array for sure
+         allocate(A(dim1,dim2))
 
       endif allocation_state
 
-      end subroutine reallocate_int_matrix
+   end subroutine reallocate_int_matrix
 
 
 !     ******************************************************************
 !     ** DEALLOCATE ARRAYS                                            **
 !     ******************************************************************
-      subroutine deallocate_double_array(A)
+   subroutine deallocate_double_array(A)
       implicit none
 
       real (dp)       , dimension(:), allocatable, intent(inout) :: A
@@ -309,9 +309,9 @@ c     *****************************************************************
       ! Complete deallocation
       if (allocated(A)) deallocate(A)
 
-      end subroutine deallocate_double_array
+   end subroutine deallocate_double_array
 
-      subroutine deallocate_double_matrix(A)
+   subroutine deallocate_double_matrix(A)
       implicit none
 
       real (dp)       , dimension(:,:), allocatable, intent(inout) :: A
@@ -319,9 +319,9 @@ c     *****************************************************************
       ! Complete deallocation
       if (allocated(A)) deallocate(A)
 
-      end subroutine deallocate_double_matrix
+   end subroutine deallocate_double_matrix
 
-      subroutine deallocate_int_array(A)
+   subroutine deallocate_int_array(A)
       implicit none
 
       integer, dimension(:), allocatable, intent(inout) :: A
@@ -329,9 +329,9 @@ c     *****************************************************************
       ! Complete deallocation
       if (allocated(A)) deallocate(A)
 
-      end subroutine deallocate_int_array
+   end subroutine deallocate_int_array
 
-      subroutine deallocate_int_matrix(A)
+   subroutine deallocate_int_matrix(A)
       implicit none
 
       integer, dimension(:,:), allocatable, intent(inout) :: A
@@ -339,13 +339,13 @@ c     *****************************************************************
       ! Complete deallocation
       if (allocated(A)) deallocate(A)
 
-      end subroutine deallocate_int_matrix
+   end subroutine deallocate_int_matrix
 
 !     ******************************************************************
 !     ** CHANGE SIZE OF ARRAYS                                        **
 !     ******************************************************************
 
-      subroutine change_size_double_array(A,dim)
+   subroutine change_size_double_array(A,dim)
       implicit none
 
       real (dp)       , dimension(:), allocatable, intent(inout) :: A
@@ -361,31 +361,31 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A) /= dim) then
+         ! Check for current array size
+         change_needed: if (size(A) /= dim) then
 
-           allocate(tmp(size(A)))
-           tmp = A
+            allocate(tmp(size(A)))
+            tmp = A
 
-           deallocate(A)
-           allocate(A(dim))
+            deallocate(A)
+            allocate(A(dim))
 
-           A(1:min(dim,size(tmp))) = tmp(1:min(dim,size(tmp)))
-           A(min(dim,size(tmp))+1:dim) = 0.e0_dp
+            A(1:min(dim,size(tmp))) = tmp(1:min(dim,size(tmp)))
+            A(min(dim,size(tmp))+1:dim) = 0.e0_dp
 
-           deallocate(tmp)
-        endif change_needed
+            deallocate(tmp)
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim))
+         ! Allocate array for sure
+         allocate(A(dim))
 
       endif allocation_state
 
-      end subroutine change_size_double_array
+   end subroutine change_size_double_array
 
-      subroutine change_size_int_array(A,dim)
+   subroutine change_size_int_array(A,dim)
       implicit none
 
       integer, dimension(:), allocatable, intent(inout) :: A
@@ -401,29 +401,29 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A) /= dim) then
+         ! Check for current array size
+         change_needed: if (size(A) /= dim) then
 
-           allocate(tmp(size(A)))
-           tmp = A
+            allocate(tmp(size(A)))
+            tmp = A
 
-           deallocate(A)
-           allocate(A(dim))
+            deallocate(A)
+            allocate(A(dim))
 
-           A(1:min(dim,size(tmp))) = tmp(1:min(dim,size(tmp)))
-           A(min(dim,size(tmp))+1:dim) = 0
+            A(1:min(dim,size(tmp))) = tmp(1:min(dim,size(tmp)))
+            A(min(dim,size(tmp))+1:dim) = 0
 
-           deallocate(tmp)
-        endif change_needed
+            deallocate(tmp)
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim))
+         ! Allocate array for sure
+         allocate(A(dim))
 
       endif allocation_state
 
-      end subroutine change_size_int_array
+   end subroutine change_size_int_array
 
 
 
@@ -432,7 +432,7 @@ c     *****************************************************************
 !     ** QUICKSORT algorithm                                          **
 !     ******************************************************************
 
-      recursive subroutine double_quick_sort(list)
+   recursive subroutine double_quick_sort(list)
 
       real (dp)       , dimension(:), intent(inout) :: list
 
@@ -455,8 +455,8 @@ c     *****************************************************************
             ! Scan list from left end
             ! until element >= chosen is found
             scan_from_left: do
-              i = i + 1
-              if (list(i) >= chosen) exit scan_from_left
+               i = i + 1
+               if (list(i) >= chosen) exit scan_from_left
             end do scan_from_left
 
             ! Scan list from right end
@@ -468,15 +468,15 @@ c     *****************************************************************
             end do scan_from_right
 
             swap: if (i < j) then
-                ! Swap two out of place elements
-                temp = list(i)
-                list(i) = list(j)
-                list(j) = temp
+               ! Swap two out of place elements
+               temp = list(i)
+               list(i) = list(j)
+               list(j) = temp
             else if (i == j) then
-                i = i + 1
-                exit
+               i = i + 1
+               exit
             else
-                exit
+               exit
             endif swap
 
          end do scan_lists
@@ -486,9 +486,9 @@ c     *****************************************************************
 
       end if choose_sorting_algorithm ! test for small array
 
-      end subroutine double_quick_sort
+   end subroutine double_quick_sort
 
-      recursive subroutine int_quick_sort(list)
+   recursive subroutine int_quick_sort(list)
 
       integer, dimension(:), intent(inout) :: list
 
@@ -510,8 +510,8 @@ c     *****************************************************************
             ! Scan list from left end
             ! until element >= chosen is found
             scan_from_left: do
-              i = i + 1
-              if (list(i) >= chosen) exit scan_from_left
+               i = i + 1
+               if (list(i) >= chosen) exit scan_from_left
             end do scan_from_left
 
             ! Scan list from right end
@@ -523,15 +523,15 @@ c     *****************************************************************
             end do scan_from_right
 
             swap: if (i < j) then
-                ! Swap two out of place elements
-                temp = list(i)
-                list(i) = list(j)
-                list(j) = temp
+               ! Swap two out of place elements
+               temp = list(i)
+               list(i) = list(j)
+               list(j) = temp
             else if (i == j) then
-                i = i + 1
-                exit
+               i = i + 1
+               exit
             else
-                exit
+               exit
             endif swap
 
          end do scan_lists
@@ -541,10 +541,10 @@ c     *****************************************************************
 
       end if choose_sorting_algorithm ! test for small array
 
-      end subroutine int_quick_sort
+   end subroutine int_quick_sort
 
 
-      subroutine double_interchange_sort(list)
+   subroutine double_interchange_sort(list)
 
       real (dp)       , dimension(:), intent(inout) :: list
 
@@ -554,16 +554,16 @@ c     *****************************************************************
       do i = 1, size(list) - 1
          do j = i + 1, size(list)
             if (list(i) > list(j)) then
-                temp = list(i)
-                list(i) = list(j)
-                list(j) = temp
+               temp = list(i)
+               list(i) = list(j)
+               list(j) = temp
             end if
          end do
       end do
 
-      end subroutine double_interchange_sort
+   end subroutine double_interchange_sort
 
-      subroutine int_interchange_sort(list)
+   subroutine int_interchange_sort(list)
 
       integer, dimension(:), intent(inout) :: list
 
@@ -572,24 +572,24 @@ c     *****************************************************************
       do i = 1, size(list) - 1
          do j = i + 1, size(list)
             if (list(i) > list(j)) then
-                temp = list(i)
-                list(i) = list(j)
-                list(j) = temp
+               temp = list(i)
+               list(i) = list(j)
+               list(j) = temp
             end if
          end do
       end do
 
-      end subroutine int_interchange_sort
+   end subroutine int_interchange_sort
 
 
-      subroutine extend_double_array(A,dim)
+   subroutine extend_double_array(A,dim)
       implicit none
 
       real (dp)       , dimension(:), allocatable, intent(inout) :: A
       integer,                                     intent(in)    :: dim
       integer :: state
-      character(len=*), parameter ::
-     & fmt_er = "(' Error: allocation failed. Size= ',I10,' state=',I9)"
+      character(len=*), parameter ::&
+      &fmt_er = "(' Error: allocation failed. Size= ',I10,' state=',I9)"
 
       if (dim < 0) then
          write(*,*)'Cannot allocate with negative size:',dim
@@ -599,34 +599,34 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A) < dim) then
-           deallocate(A)
-           allocate(A(dim), stat=state)
-        endif change_needed
+         ! Check for current array size
+         change_needed: if (size(A) < dim) then
+            deallocate(A)
+            allocate(A(dim), stat=state)
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim), stat=state)
+         ! Allocate array for sure
+         allocate(A(dim), stat=state)
 
       endif allocation_state
 
       if (state /= 0) then
-        write(*,fmt_er)dim,state
-        stop
+         write(*,fmt_er)dim,state
+         stop
       endif
 
-      end subroutine extend_double_array
+   end subroutine extend_double_array
 
-      subroutine extend_int_array(A,dim)
+   subroutine extend_int_array(A,dim)
       implicit none
 
       integer, dimension(:), allocatable, intent(inout) :: A
       integer,                            intent(in)    :: dim
       integer :: state
-      character(len=*), parameter ::
-     & fmt_er = "(' Error: allocation failed. Size= ',I10,' state=',I9)"
+      character(len=*), parameter ::&
+      &fmt_er = "(' Error: allocation failed. Size= ',I10,' state=',I9)"
 
       if (dim < 0) then
          write(*,*)'Cannot allocate with negative size:',dim
@@ -636,35 +636,35 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A) < dim) then
-           deallocate(A)
-           allocate(A(dim), stat = state)
-        endif change_needed
+         ! Check for current array size
+         change_needed: if (size(A) < dim) then
+            deallocate(A)
+            allocate(A(dim), stat = state)
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim), stat = state)
+         ! Allocate array for sure
+         allocate(A(dim), stat = state)
 
       endif allocation_state
 
       if (state /= 0) then
-        write(*,fmt_er)dim,state
-        stop
+         write(*,fmt_er)dim,state
+         stop
       endif
 
-      end subroutine extend_int_array
+   end subroutine extend_int_array
 
-      subroutine extend_char_array(A,dim)
+   subroutine extend_char_array(A,dim)
       implicit none
 
       character(len=*), dimension(:), allocatable, intent(inout) :: A
       integer,                                     intent(in)    :: dim
       integer :: lgth
       integer :: state
-      character(len=*), parameter ::
-     & fmt_er = "(' Error: allocation failed. Size= ',I10,' state=',I9)"
+      character(len=*), parameter ::&
+      &fmt_er = "(' Error: allocation failed. Size= ',I10,' state=',I9)"
 
       if (dim < 0) then
          write(*,*)'Cannot allocate with negative size:',dim
@@ -675,29 +675,29 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A) < dim) then
-           deallocate(A)
-           allocate(A(dim), stat=state)
-        endif change_needed
+         ! Check for current array size
+         change_needed: if (size(A) < dim) then
+            deallocate(A)
+            allocate(A(dim), stat=state)
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim), stat=state)
+         ! Allocate array for sure
+         allocate(A(dim), stat=state)
 
       endif allocation_state
 
       if (state /= 0) then
-        write(*,fmt_er)dim,state
-        stop
+         write(*,fmt_er)dim,state
+         stop
       endif
 
-      end subroutine extend_char_array
+   end subroutine extend_char_array
 
 
 
-      subroutine extend_double_matrix(A,dim1, dim2)
+   subroutine extend_double_matrix(A,dim1, dim2)
       implicit none
 
       real (dp)       , dimension(:,:), allocatable, intent(inout) :: A
@@ -712,26 +712,26 @@ c     *****************************************************************
       ! Check for current allocation
       allocation_state: if (allocated(A)) then
 
-        ! Check for current array size
-        change_needed: if (size(A,1) < dim1 .or. size(A,2)<dim2) then
-           deallocate(A)
-           allocate(A(dim1,dim2))
-        endif change_needed
+         ! Check for current array size
+         change_needed: if (size(A,1) < dim1 .or. size(A,2)<dim2) then
+            deallocate(A)
+            allocate(A(dim1,dim2))
+         endif change_needed
 
       else
 
-        ! Allocate array for sure
-        allocate(A(dim1,dim2))
+         ! Allocate array for sure
+         allocate(A(dim1,dim2))
 
       endif allocation_state
 
-      end subroutine extend_double_matrix
+   end subroutine extend_double_matrix
 
 
-      ! ****************************************************************
-      ! ** Convert integer into string with leading zeros             **
-      ! ****************************************************************
-      function int_to_string(num,length) result(str)
+   ! ****************************************************************
+   ! ** Convert integer into string with leading zeros             **
+   ! ****************************************************************
+   function int_to_string(num,length) result(str)
       implicit none
 
       integer, intent(in)   :: num, length
@@ -752,107 +752,107 @@ c     *****************************************************************
       ipos = length
       do while (numtmp > 0)
 
-        ! Check for number too long
-        if (ipos < 1) then
+         ! Check for number too long
+         if (ipos < 1) then
             do i = 1, length
-                str(i:i) = '*'
+               str(i:i) = '*'
             end do
             exit
-        endif
+         endif
 
-        numprt = numtmp - int(numtmp/10)*10
-        numtmp = numtmp / 10
-        write(str(ipos:ipos),'(I1)')numprt
-        ipos = ipos - 1
+         numprt = numtmp - int(numtmp/10)*10
+         numtmp = numtmp / 10
+         write(str(ipos:ipos),'(I1)')numprt
+         ipos = ipos - 1
 
       end do
 
-      end function int_to_string
+   end function int_to_string
 
-      ! ****************************************************************
-      ! ** Find an equal string in an array of strings                **
-      ! ****************************************************************
-      function find_string_in_array(string,strarray) result(ifind)
-        implicit none
+   ! ****************************************************************
+   ! ** Find an equal string in an array of strings                **
+   ! ****************************************************************
+   function find_string_in_array(string,strarray) result(ifind)
+      implicit none
 
-        character(len=*),               intent(in) :: string
-        character(len=*), dimension(:), intent(in) :: strarray
-        integer                                    :: ifind
+      character(len=*),               intent(in) :: string
+      character(len=*), dimension(:), intent(in) :: strarray
+      integer                                    :: ifind
 
-        integer                                    :: i, n_list
-        integer                                    :: lenl, lens
+      integer                                    :: i, n_list
+      integer                                    :: lenl, lens
 
-        ! Length of string and list
-        lenl = len(strarray)
-        lens = len(string)
+      ! Length of string and list
+      lenl = len(strarray)
+      lens = len(string)
 
-        n_list = size(strarray,1)
+      n_list = size(strarray,1)
 
-        ! Initialise ifind as not found
-        ifind = 0
+      ! Initialise ifind as not found
+      ifind = 0
 
-        do i = 1, n_list
+      do i = 1, n_list
 
-          if (trim(adjustl(string)) == trim(adjustl(strarray(i)))) then
-
-            ifind = i
-            return
-
-          endif
-
-        end do
-
-        end function find_string_in_array
-
-
-      ! ****************************************************************
-      ! ** Find an equal string in an array of strings                **
-      ! ** case insensitive version                                   **
-      ! ****************************************************************
-      function find_stringi_in_array(string,strarray) result(ifind)
-        implicit none
-
-        interface
-            function fs_cap(s)
-              character(len=*), intent(in) :: s
-              character(len=len(s))        :: fs_cap
-            end function fs_cap      
-        end interface
-
-
-        character(len=*),               intent(in) :: string
-        character(len=*), dimension(:), intent(in) :: strarray
-        integer                                    :: ifind
-
-        integer                                    :: i, n_list
-        integer                                    :: lenl, lens
-
-        ! Length of string and list
-        lenl = len(strarray)
-        lens = len(string)
-
-        n_list = size(strarray,1)
-
-        ! Initialise ifind as not found
-        ifind = 0
-
-        do i = 1, n_list
-
-          if ( trim(adjustl(fs_cap(string)))   == 
-     &         trim(adjustl(fs_cap(strarray(i))))) then
+         if (trim(adjustl(string)) == trim(adjustl(strarray(i)))) then
 
             ifind = i
             return
 
-          endif
+         endif
 
-        end do
+      end do
 
-        end function find_stringi_in_array
+   end function find_string_in_array
+
+
+   ! ****************************************************************
+   ! ** Find an equal string in an array of strings                **
+   ! ** case insensitive version                                   **
+   ! ****************************************************************
+   function find_stringi_in_array(string,strarray) result(ifind)
+      implicit none
+
+      interface
+         function fs_cap(s)
+            character(len=*), intent(in) :: s
+            character(len=len(s))        :: fs_cap
+         end function fs_cap
+      end interface
+
+
+      character(len=*),               intent(in) :: string
+      character(len=*), dimension(:), intent(in) :: strarray
+      integer                                    :: ifind
+
+      integer                                    :: i, n_list
+      integer                                    :: lenl, lens
+
+      ! Length of string and list
+      lenl = len(strarray)
+      lens = len(string)
+
+      n_list = size(strarray,1)
+
+      ! Initialise ifind as not found
+      ifind = 0
+
+      do i = 1, n_list
+
+         if ( trim(adjustl(fs_cap(string)))   ==&
+         &trim(adjustl(fs_cap(strarray(i))))) then
+
+            ifind = i
+            return
+
+         endif
+
+      end do
+
+   end function find_stringi_in_array
 
 
 
-      end module utilities
+end module utilities
 
 
 
@@ -932,17 +932,17 @@ c     *****************************************************************
 
 
 
-c     *****************************************************************
-c     **                                                             **
-c     **                     SpeedCHEM FORTRAN                       **
-c     **                                                             **
-c     **      Converting dense matrix into sparse CSR format         **
-c     **                                                             **
-c     **                                                             **
-c     **   Author:      Federico Perini                              **
-c     **   Last update: thursday, 10/06/2010                         **
-c     **                                                             **
-c     *****************************************************************
+!     *****************************************************************
+!     **                                                             **
+!     **                     SpeedCHEM FORTRAN                       **
+!     **                                                             **
+!     **      Converting dense matrix into sparse CSR format         **
+!     **                                                             **
+!     **                                                             **
+!     **   Author:      Federico Perini                              **
+!     **   Last update: thursday, 10/06/2010                         **
+!     **                                                             **
+!     *****************************************************************
 
 !      subroutine CSR(nrows,ncols,matrice,vals,col_ind,row_ptrB,
 !     &               row_ptrE,nvals,r)
@@ -990,82 +990,82 @@ c     *****************************************************************
 !
 !	  row_ptrE(r) = nvals+1
 
-c      write(*,*)nvals,r
-c     Counting number of matrix elements and initialising sparse
-c      call find_indices2D(matrice.ne.0.d0)
+!      write(*,*)nvals,r
+!     Counting number of matrix elements and initialising sparse
+!      call find_indices2D(matrice.ne.0.d0)
 
-c      write(*,*)nrows,ncols
+!      write(*,*)nrows,ncols
 
-c      nvals = size(i2D1)
+!      nvals = size(i2D1)
 
-c      vals(1:nvals)    = 0.d0
-c      col_ind(1:nvals) = 0
+!      vals(1:nvals)    = 0.d0
+!      col_ind(1:nvals) = 0
 
 
-c     Reordering i2D1 and i2D2 in row-wise format
-c      do i=1,nvals
-c        do j=i+1,nvals
+!     Reordering i2D1 and i2D2 in row-wise format
+!      do i=1,nvals
+!        do j=i+1,nvals
 
-c	 if (i2D1(j).le.i2D1(i)) then
-c
-c	  k = i2D1(j)
-c	  i2D1(j) = i2D1(i)
-c	  i2D1(i) = k
-c
-c	  k = i2D2(j)
-c	  i2D2(j) = i2D2(i)
-c	  i2D2(i) = k
-c
-c	 endif
-c
-c	end do
-c
-c	write(*,"(2I5)")i2D1(i),i2D2(i)
-c     end do
-c  c    pause
+!	 if (i2D1(j).le.i2D1(i)) then
+!
+!	  k = i2D1(j)
+!	  i2D1(j) = i2D1(i)
+!	  i2D1(i) = k
+!
+!	  k = i2D2(j)
+!	  i2D2(j) = i2D2(i)
+!	  i2D2(i) = k
+!
+!	 endif
+!
+!	end do
+!
+!	write(*,"(2I5)")i2D1(i),i2D2(i)
+!     end do
+!  c    pause
 
-c     Counting number of rows used
-c      k = 0
-c c     r = 0
+!     Counting number of rows used
+!      k = 0
+! c     r = 0
 
-c      do i=1,nvals
-c        if (i2D1(i).ne.k) then
-c	k = i2D1(i)
-c	r = r+1
-c	end if
-c      end do
-c
-c
-c      k = 0
-c      r = 0
-c      do i = 1,nvals
-c
-c        vals(i)    = matrice(i2D1(i),i2D2(i))
-c	col_ind(i) = i2D2(i)
-c
-c	if (i2D1(i).gt.k) then
-c	  k = k+1
-c	  row_ptr(k) = i2D1(i)
-c	  r = row_ptr(k)
-c	endif
-c
-c      end do
+!      do i=1,nvals
+!        if (i2D1(i).ne.k) then
+!	k = i2D1(i)
+!	r = r+1
+!	end if
+!      end do
+!
+!
+!      k = 0
+!      r = 0
+!      do i = 1,nvals
+!
+!        vals(i)    = matrice(i2D1(i),i2D2(i))
+!	col_ind(i) = i2D2(i)
+!
+!	if (i2D1(i).gt.k) then
+!	  k = k+1
+!	  row_ptr(k) = i2D1(i)
+!	  r = row_ptr(k)
+!	endif
+!
+!      end do
 
 
 !      end subroutine CSR
 
 
 
-      elemental subroutine lower_case(word)
-c     ! convert a word to lower case
-      character (len=*) , intent(in out) :: word
-      integer :: i,ic,nlen
-      nlen = len(word)
-      do i=1,nlen
-         ic = ichar(word(i:i))
-          if (ic >= 65 .and. ic < 90) word(i:i) = char(ic+32)
-      end do
-      end subroutine lower_case
+elemental subroutine lower_case(word)
+!     ! convert a word to lower case
+   character (len=*) , intent(in out) :: word
+   integer :: i,ic,nlen
+   nlen = len(word)
+   do i=1,nlen
+      ic = ichar(word(i:i))
+      if (ic >= 65 .and. ic < 90) word(i:i) = char(ic+32)
+   end do
+end subroutine lower_case
 
 
 
@@ -1076,7 +1076,7 @@ c     ! convert a word to lower case
 
 
 
-      subroutine SC_ch_cap ( ch )
+subroutine SC_ch_cap ( ch )
 
 !*****************************************************************************80
 !
@@ -1103,70 +1103,23 @@ c     ! convert a word to lower case
 !
 !    Input/output, character CH, the character to capitalize.
 !
-      implicit none
+   implicit none
 
-      character              ch
-      integer   ( kind = 4 ) itemp
+   character              ch
+   integer   ( kind = 4 ) itemp
 
-      itemp = iachar ( ch )
+   itemp = iachar ( ch )
 
-      if ( 97 <= itemp .and. itemp <= 122 ) then
-        ch = achar ( itemp - 32 )
-      end if
+   if ( 97 <= itemp .and. itemp <= 122 ) then
+      ch = achar ( itemp - 32 )
+   end if
 
-      return
+   return
 
-      end
-
-
-      function fs_cap ( s )
-
-!*****************************************************************************80
-!
-!! S_CAP replaces any lowercase letters by uppercase ones in a string.
-!
-!  Licensing:
-!
-!    This code is distributed under the GNU LGPL license.
-!
-!  Modified:
-!
-!    28 June 2000
-!
-!  Author:
-!
-!    John Burkardt
-!
-!  Parameters:
-!
-!    Input/output, character ( len = * ) S, the string to be transformed.
-!
-       implicit none
-
-       character              ch
-       integer   ( kind = 4 ) i
-       character ( len = * ), intent(in) ::  s
-       character ( len = len(s) )        ::  fs_cap
-       integer   ( kind = 4 ) s_length
-
-       s_length = len_trim ( s )
-       fs_cap    = s
-       
-
-       do i = 1, s_length
-
-         ch = s(i:i)
-         call SC_ch_cap ( ch )
-         fs_cap(i:i) = ch
-
-       end do
-
-       return
-       end function fs_cap
+end
 
 
-
-      subroutine s_cap ( s )
+function fs_cap ( s )
 
 !*****************************************************************************80
 !
@@ -1188,26 +1141,73 @@ c     ! convert a word to lower case
 !
 !    Input/output, character ( len = * ) S, the string to be transformed.
 !
-       implicit none
+   implicit none
 
-       character              ch
-       integer   ( kind = 4 ) i
-       character ( len = * )  s
-       integer   ( kind = 4 ) s_length
+   character              ch
+   integer   ( kind = 4 ) i
+   character ( len = * ), intent(in) ::  s
+   character ( len = len(s) )        ::  fs_cap
+   integer   ( kind = 4 ) s_length
 
-       s_length = len_trim ( s )
-       
+   s_length = len_trim ( s )
+   fs_cap    = s
 
-       do i = 1, s_length
 
-         ch = s(i:i)
-         call SC_ch_cap ( ch )
-         s(i:i) = ch
+   do i = 1, s_length
 
-       end do
+      ch = s(i:i)
+      call SC_ch_cap ( ch )
+      fs_cap(i:i) = ch
 
-       return
-       end subroutine s_cap
+   end do
+
+   return
+end function fs_cap
+
+
+
+subroutine s_cap ( s )
+
+!*****************************************************************************80
+!
+!! S_CAP replaces any lowercase letters by uppercase ones in a string.
+!
+!  Licensing:
+!
+!    This code is distributed under the GNU LGPL license.
+!
+!  Modified:
+!
+!    28 June 2000
+!
+!  Author:
+!
+!    John Burkardt
+!
+!  Parameters:
+!
+!    Input/output, character ( len = * ) S, the string to be transformed.
+!
+   implicit none
+
+   character              ch
+   integer   ( kind = 4 ) i
+   character ( len = * )  s
+   integer   ( kind = 4 ) s_length
+
+   s_length = len_trim ( s )
+
+
+   do i = 1, s_length
+
+      ch = s(i:i)
+      call SC_ch_cap ( ch )
+      s(i:i) = ch
+
+   end do
+
+   return
+end subroutine s_cap
 
 
 
