@@ -1,0 +1,30 @@
+# ---- Build output (per-compiler dirs produced by Makefile / scripts) ----
+/gfortran/
+/ifx/
+/build/
+
+# ---- Fortran build artifacts (anywhere) ----
+*.o
+*.mod
+*.smod
+*.a
+*.so
+*.dylib
+
+# ---- Logs ----
+*.log
+
+# ---- fpm ----
+/build/
+
+# ---- Editor / OS cruft ----
+*~
+*.swp
+*.swo
+.DS_Store
+.vscode/
+.idea/
+
+# ---- Core dumps (scripts enable -fdump-core) ----
+core
+core.*

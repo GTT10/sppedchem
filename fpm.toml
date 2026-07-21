@@ -1,0 +1,21 @@
+name = "speedchem"
+version = "0.1.0"
+license = "license"
+author = "SpeedCHEM developers"
+maintainer = "pqg693x1@s.okayama-u.ac.jp"
+
+[build]
+auto-executables = false
+auto-tests = false
+auto-examples = false
+
+[install]
+library = true
+
+[library]
+source-dir = "src"
+
+[fortran]
+implicit-typing = false
+implicit-external = false
+source-form = "free"
