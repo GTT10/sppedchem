@@ -177,8 +177,16 @@
              dYdt => dyindt(2:neq)
           endif
 
+!         dyindt is intent(out); initialise it deterministically so the
+!         early return on an invalid temperature below never hands the
+!         solver an undefined derivative (which it would otherwise use to
+!         build the next step / a numerical Jacobian).
+          dyindt = zero
+
 !         Error handling for NaNs or negatives arising from ODE solver
           where ( abs(Yp) < small ) Yp = sign(small,Yp)
+!         Bail out on a non-positive or NaN temperature. `.not. T > zero`
+!         is true for T<=0 and for NaN. Output is already zeroed above.
           if (.not. T > zero) return
 
 
@@ -586,26 +594,31 @@
       uY = one/Y
 
 !     Error check on temperature (.not.T>0.e0_dp) means T is negative
-!     or NaN; the same for pressure
-      if (.not. T   > zero) return
-      if (.not. SCP > zero) return
+!     or NaN; the same for pressure. On an invalid state, set the sparse
+!     Jacobian to a safe placeholder (as the empty/wrong-item guard above
+!     does) rather than returning with JAC_sparse left at its stale value
+!     from a previous call.
+      if (.not. T > zero .or. .not. SCP > zero) then
+         if (allocated(JAC_sparse%A)) JAC_sparse%A = small
+         return
+      endif
 
 !     Flag to compute using accurate/tabulated thermodynamic data
       compute_accurate_thermo = .not.use_table(T)
 
-!     Assign Jacobian sub-parts: ÚÄÄÄÄÂÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
-!                                ³dTdT³        JACTY          ³
-!                                ÃÄÄÄÄÅÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ´
-!                                ³    ³                       ³
-!                                ³ d  ³                       ³
-!                                ³ Y  ³                       ³
-!                                ³ _  ³                       ³
-!                                ³ d  ³        JACYY          ³
-!                                ³ T  ³                       ³
-!                                ³    ³                       ³
-!                                ³    ³                       ³
-!                                ³    ³                       ³
-!                                ÀÄÄÄÄÁÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+!     Assign Jacobian sub-parts: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿
+!                                ï¿½dTdTï¿½        JACTY          ï¿½
+!                                ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä´
+!                                ï¿½    ï¿½                       ï¿½
+!                                ï¿½ d  ï¿½                       ï¿½
+!                                ï¿½ Y  ï¿½                       ï¿½
+!                                ï¿½ _  ï¿½                       ï¿½
+!                                ï¿½ d  ï¿½        JACYY          ï¿½
+!                                ï¿½ T  ï¿½                       ï¿½
+!                                ï¿½    ï¿½                       ï¿½
+!                                ï¿½    ï¿½                       ï¿½
+!                                ï¿½    ï¿½                       ï¿½
+!                                ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 !     ** Load thermodynamic temperature-dependent parameters **************
 !     Temperatures and beyond
