@@ -24,6 +24,22 @@ Alternative standalone build scripts (do the same compile without make): `script
 
 An `fpm.toml` exists but the Makefile/scripts are the canonical build. `fpm` is risky here: it auto-globs `src/` and would try to compile `radau5s.f`, which is deliberately excluded from the real build (see below).
 
+## Testing
+
+There is one end-to-end smoke test that drives the whole pipeline and gates on the result. Since the repo is a library with no main program, the test provides its own driver.
+
+```bash
+scripts/run_tests.sh            # ifx (default) — matches the ifx-first policy
+scripts/run_tests.sh gfortran   # gfortran
+SC_MECHDIR=/path/to/data/ scripts/run_tests.sh   # run against a different mechanism dir
+```
+
+`run_tests.sh` builds `libSpeedCHEM64.a`, compiles+links [test/driver_smoke.f90](test/driver_smoke.f90) via the MPI wrapper (mpiifx/mpif90 — the library uses MPI in `sparse_MPI.f`/`SCbroadcast.f90`, though the driver itself never calls `MPI_INIT`), runs it, and exits non-zero on failure.
+
+What the driver does: sets `mechdir`, calls `chemistry_input` (the full setup orchestrator: CKINTP → cklink → SCcklink → sparse setup → `ODE_solver_speedchem_init`), seeds a **hot stoichiometric n-hexadecane/air state** (looked up by species name via the public `specie`/`ns` from `speedchem`), integrates constant-volume with `chemistry_ODE_integrate`, and asserts the solution is finite **and the temperature rose >100 K (autoignition)**. Baseline: the bundled mechanism links to 51 species / 153 reactions and ignites 1400 K → ~1798 K, bit-identical on ifx and gfortran.
+
+Test mechanism lives in [test/data/](test/data/) (`chem.inp` = a 51-species PRF n-hexadecane/iso-cetane skeletal mechanism, `therm.dat`). Only those two inputs are tracked; the run writes `cklink`, `SpeedCHEM.out`, `chem.out`, `dat.*` etc. into that dir and they are gitignored. Use this test as the regression gate for any refactor.
+
 ### Critical: compile order is fixed and must not change
 
 The source files have inter-module dependencies but there is **no dependency-graph build** — modules are compiled in one hard-coded serial order. This exact order is duplicated in three places and must be kept in sync: the `SRCS` list in [Makefile](Makefile), `scripts/compile_gfort64opt.sh`, and `scripts/ifx.sh`. Key constraints:

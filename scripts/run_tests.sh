@@ -52,8 +52,9 @@ if ! command -v "$LIB_FC" >/dev/null 2>&1; then
 fi
 
 # ---- Mechanism directory ----------------------------------------------------------------
-# Default is the production data dir; override with SC_MECHDIR. Must end with a separator.
-export SC_MECHDIR=${SC_MECHDIR:-/mnt/sn850/Projects/gtt/input/gttdata/}
+# Default is the bundled test mechanism (test/data/); override with SC_MECHDIR to point at
+# another dir (e.g. production data). Must end with a separator.
+export SC_MECHDIR=${SC_MECHDIR:-$root_dir/test/data/}
 case "$SC_MECHDIR" in
   */) ;;
   *) SC_MECHDIR="$SC_MECHDIR/" ;;
