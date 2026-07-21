@@ -30,6 +30,10 @@ program driver_smoke
     ! --- Configuration -----------------------------------------------------------------------
     character(len=256) :: mech
     integer            :: env_len, env_stat
+    ! Optional solver override (SC_SOLVER): pick a numeric-Jacobian solver for
+    ! PLOG mechanisms (the analytic-Jac default is refused with PLOG until stage 3).
+    character(len=15)  :: solver_override
+    integer            :: sv_len, sv_stat
 
     ! --- Problem state -----------------------------------------------------------------------
     real (dp), allocatable :: yin(:), atol(:)
@@ -79,6 +83,13 @@ program driver_smoke
     write(*,'(a)') bar
     write(*,'(a)') ' Interpreting mechanism and building sparse chemistry...'
     call chemistry_input
+
+    ! Optional: override the solver (e.g. a numeric-Jacobian solver for PLOG).
+    call get_environment_variable('SC_SOLVER', solver_override, sv_len, sv_stat)
+    if (sv_stat == 0 .and. sv_len > 0) then
+        solver = trim(adjustl(solver_override))
+        write(*,'(2a)') '   solver override: ', trim(solver)
+    end if
 
     write(*,'(a,i0)')  '   species  (ns)  = ', ns
     write(*,'(a,i0)')  '   reactions(nr)  = ', nr
