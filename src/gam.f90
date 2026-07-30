@@ -894,7 +894,7 @@ SUBROUTINE  ETRO(R,FCN,T0,Y0,TEND,HMAX,H,RTOL,ATOL,ITOL,&
 !   COMMON
 !------------------------------------
    COMMON/LINAL/MLLU,MULU,MDIAG
-!$ OMP THREADPRIVATE(/LINAL/)
+!$OMP THREADPRIVATE(/LINAL/)
 !
 !   INPUT VARIABLES
 !------------------------------------

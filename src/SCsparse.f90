@@ -96,7 +96,7 @@ module sparse_algebra
 !        Arrays for sparse matrix computations
    integer :: lspwork,ls2work
    real (dp)       , dimension(:), allocatable :: spwork,s2work
-!$ OMP    THREADPRIVATE(lspwork,ls2work,spwork,s2work)
+!$OMP    THREADPRIVATE(lspwork,ls2work,spwork,s2work)
 
 contains
 

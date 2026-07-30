@@ -153,7 +153,7 @@
       character(len=16)                            :: ckvers, ckprec
       character(len=16), dimension(:), allocatable :: tmpchar
 
-      logical :: ispresent, ispresent2, kerr
+      logical :: ispresent, ispresent2, kerr, invalid_plog
       integer :: i, j, k, idummy1, idummy2
       integer :: liwork, lrwork, lcwork, mm, kk, ii, maxsp, maxtb,    &
                  maxtp, nthcf, nipar, nitar, nifar, nrv, nfl, nthb,   &
@@ -1016,10 +1016,12 @@
              error stop 1
           endif
           do ipl = 1, n_plog_reactions
-             if (plog_reaction(ipl) < 1 .or. plog_reaction(ipl) > nr .or. &
-                 (ipl > 1 .and.                                         &
-                  plog_reaction(ipl) <= plog_reaction(ipl-1)) .or.       &
-                 plog_node_ptr(ipl) <= plog_node_ptr(ipl-1)) then
+             invalid_plog = plog_reaction(ipl) < 1 .or.                &
+                            plog_reaction(ipl) > nr .or.                &
+                            plog_node_ptr(ipl) <= plog_node_ptr(ipl-1)
+             if (ipl > 1) invalid_plog = invalid_plog .or.             &
+                  plog_reaction(ipl) <= plog_reaction(ipl-1)
+             if (invalid_plog) then
                 write(*   , "(' ERROR: invalid cklink v2 PLOG reaction',"//&
                             "' map/pointers at packed reaction ',I0,"//   &
                             "'. Aborting.')") ipl
@@ -1027,14 +1029,15 @@
                 error stop 1
              endif
              do inode = plog_node_ptr(ipl-1)+1, plog_node_ptr(ipl)
-                if (.not. ieee_is_finite(plog_logP(inode)) .or.         &
-                    .not. ieee_is_finite(plog_A(inode)) .or.            &
-                    .not. ieee_is_finite(plog_b(inode)) .or.            &
-                    .not. ieee_is_finite(plog_EoverR(inode)) .or.       &
-                    .not. plog_A(inode) > zero .or.                     &
-                    (inode > plog_node_ptr(ipl-1)+1 .and.                &
-                     plog_logP(inode) < plog_logP(inode-1) -             &
-                                           1.0e-9_dp)) then
+                invalid_plog = .not. ieee_is_finite(plog_logP(inode)) .or. &
+                               .not. ieee_is_finite(plog_A(inode)) .or.    &
+                               .not. ieee_is_finite(plog_b(inode)) .or.    &
+                               .not. ieee_is_finite(plog_EoverR(inode)) .or.&
+                               .not. plog_A(inode) > zero
+                if (inode > plog_node_ptr(ipl-1)+1)                     &
+                   invalid_plog = invalid_plog .or.                     &
+                      plog_logP(inode) < plog_logP(inode-1) - 1.0e-9_dp
+                if (invalid_plog) then
                    write(*   , "(' ERROR: invalid cklink v2 PLOG node ',"//&
                                "I0,' for reaction ',I0,'. Aborting.')")  &
                                inode, plog_reaction(ipl)
