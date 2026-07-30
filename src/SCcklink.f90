@@ -961,7 +961,9 @@
           write(lout, "(' ERROR: invalid cklink v2 PLOG counts.')")
           error stop 1
        endif
-       n_plog_terms = n_plog_nodes   ! strict_chemkin: one term per node
+!      cklink v2 stores one entry per Arrhenius term. Adjacent entries
+!      may share a pressure; the evaluator groups and sums them.
+       n_plog_terms = n_plog_nodes
 
 !      Defensive: make SCcklink re-entrant (a second call in the same
 !      process must not hit "already allocated").
@@ -978,7 +980,8 @@
                    plog_node_ptr(0:n_plog_reactions))
           allocate(plog_logP(n_plog_nodes), plog_A(n_plog_nodes),      &
                    plog_b(n_plog_nodes), plog_EoverR(n_plog_nodes))
-!         strict: term_ptr(k)=k, one term per node.
+!         v2 entry-level storage: term_ptr(k)=k. Equal-pressure entries
+!         are grouped without changing the backward-compatible layout.
           allocate(plog_term_ptr(0:n_plog_nodes))
           plog_term_ptr = [(ipl, ipl = 0, n_plog_nodes)]
 
@@ -1030,7 +1033,8 @@
                     .not. ieee_is_finite(plog_EoverR(inode)) .or.       &
                     .not. plog_A(inode) > zero .or.                     &
                     (inode > plog_node_ptr(ipl-1)+1 .and.                &
-                     plog_logP(inode) <= plog_logP(inode-1))) then
+                     plog_logP(inode) < plog_logP(inode-1) -             &
+                                           1.0e-9_dp)) then
                    write(*   , "(' ERROR: invalid cklink v2 PLOG node ',"//&
                                "I0,' for reaction ',I0,'. Aborting.')")  &
                                inode, plog_reaction(ipl)

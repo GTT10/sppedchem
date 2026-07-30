@@ -5727,9 +5727,8 @@
 !   END PROLOGUE  IPPARR
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 
-      CHARACTER STRING*(*), ITEMP*80
+      CHARACTER STRING*(*), ITEMP*256, FMT_DYNAMIC*32
       DIMENSION RVAL(*)
-      CHARACTER *8 FMT(16)
       LOGICAL OKINCR
 
 !   FIRST EXECUTABLE STATEMENT  IPPARR
@@ -5788,15 +5787,21 @@
          GO TO 500
       ENDIF
 
-      DATA FMT/     ' (E1.0)', ' (E2.0)', ' (E3.0)', ' (E4.0)',  &
-         ' (E5.0)', ' (E6.0)', ' (E7.0)', ' (E8.0)', ' (E9.0)',  &
-         '(E10.0)', '(E11.0)', '(E12.0)', '(E13.0)', '(E14.0)',  &
-         '(E15.0)', '(E16.0)'/
       IES = NC - 1
       NCH = IES - IBS + 1
+      IF (NCH .GT. LEN(ITEMP)) THEN
+         IERR = 1
+         GO TO 510
+      ENDIF
       ITEMP = ' '
       ITEMP = STRING(IBS:IES)
-      READ (ITEMP(:NCH), FMT(NCH), ERR = 400) RVAL(NFOUND)
+!     The original IOPAK table only defined E formats through E16.0.
+!     yaml2ck legitimately emits round-trip decimal tokens such as
+!     0.010000000000000004 (20 characters), which previously indexed
+!     beyond that table and made valid PLOG lines fail as syntax errors.
+!     Construct the identical Ew.0 descriptor for the actual width.
+      WRITE (FMT_DYNAMIC,'("(E",I0,".0)")') NCH
+      READ (ITEMP(:NCH), FMT_DYNAMIC, ERR = 400) RVAL(NFOUND)
       GO TO 450
 400   CONTINUE
       IERR = 1
@@ -6022,9 +6027,10 @@
 !     **                                                             **
 !     **   CKAUXL calls plog_add_line() once per `PLOG / P A b E /`  **
 !     **   line; CKINTP calls plog_finalize() before writing cklink  **
-!     **   and reads the packed arrays out. strict_chemkin dialect   **
-!     **   is enforced here: pressures ascending per reaction, no    **
-!     **   duplicate pressure within a reaction.                     **
+!     **   and reads the packed arrays out. Pressures must be         **
+!     **   non-decreasing per reaction. Adjacent equal-pressure       **
+!     **   entries are retained as the multiple Arrhenius terms that  **
+!     **   CHEMKIN/Cantera sum at that pressure.                      **
 !     *****************************************************************
 
       module plog_collect
@@ -6033,9 +6039,8 @@
       implicit none
       public
 
-!     Dialect selector. Only strict_chemkin is honoured in stage 1;
-!     the enum exists so permissive_grouped can be added later without
-!     changing call sites.
+!     Dialect selector retained for on-disk/API compatibility. Both
+!     accepted modes use standard grouped same-pressure PLOG semantics.
       integer, parameter :: PLOG_STRICT_CHEMKIN     = 0
       integer, parameter :: PLOG_PERMISSIVE_GROUPED = 1
       integer :: plog_dialect = PLOG_STRICT_CHEMKIN
@@ -6057,10 +6062,11 @@
 !       plog_n_reactions              : # distinct PLOG reactions
 !       plog_reaction(1:nr_plog)      : their global reaction indices (asc)
 !       plog_node_ptr(0:nr_plog)      : node range per reaction (CSR)
-!       plog_logP_out(1:n_nodes)      : ln(P[Pa]) per node (asc in reac)
-!       plog_A_out/b_out/EoverR_out   : one Arrhenius set per node
-!     (strict: one term per node, so term-level ptr is implicit here;
-!      the v2 schema still records it for forward compatibility.)
+!       plog_logP_out(1:n_nodes)      : ln(P[Pa]) per entry (non-decreasing)
+!       plog_A_out/b_out/EoverR_out   : one Arrhenius set per entry
+!     Adjacent entries with equal pressure form one pressure node and
+!     are summed by the evaluator. The cklink v2 representation remains
+!     backward compatible because unique-pressure files are unchanged.
       integer :: plog_n_reactions = 0
       integer :: plog_n_nodes     = 0
       integer, dimension(:), allocatable :: plog_reaction
@@ -6142,7 +6148,7 @@
 !     (CAL/KCAL/JOUL/KJOU/KELV) as every other Arrhenius E — no separate
 !     conversion path that could drift (cf. the KJOU 4x bug).
 !     Sets kerr=.true. on invalid input (non-positive pressure); the
-!     duplicate-pressure / ordering checks happen in plog_finalize
+!     pressure-ordering checks happen in plog_finalize
 !     where all lines of a reaction are visible together.
 !     -------------------------------------------------------------
       subroutine plog_add_line(ireac, pressure_atm, aval, bval, eraw, kerr, lout)
@@ -6221,8 +6227,8 @@
 
 !     -------------------------------------------------------------
 !     plog_finalize: turn the flat line list into packed, per-reaction
-!     CSR arrays. Enforces strict_chemkin: within each reaction the
-!     pressure nodes must be strictly ascending (no duplicate pressure).
+!     CSR arrays. Within each reaction, pressure entries must be
+!     non-decreasing. Equal adjacent entries are legal grouped terms.
 !     Lines are already grouped by reaction because CKAUXL processes one
 !     reaction's aux lines consecutively; we still group defensively.
 !     Sets kerr=.true. on a strict-dialect violation.
@@ -6293,21 +6299,22 @@
          do i = 1, plog_nlines
             if (pcl_reac(i) == uniq(r)) then
                node = node + 1
-!              strict_chemkin: pressures strictly ascending within a
-!              reaction (also rejects duplicate pressure).
+!              Standard PLOG: pressure entries are non-decreasing.
+!              Equal adjacent pressures are multiple Arrhenius terms at
+!              one pressure node and are summed during rate evaluation.
                if (node > plog_node_ptr(r-1)+1) then
-                  if (plog_logP_out(node-1) >= pcl_logP(i) - logp_tol) then
+                  if (pcl_logP(i) < plog_logP_out(node-1) - logp_tol) then
 !                    Fail-closed (see note above): error stop, not STOP.
                      write(*   ,'(A,I6,A)')                             &
                         ' ERROR...PLOG pressures for reaction ',        &
                         uniq(r),                                        &
-                        ' are not strictly ascending (duplicate or'//   &
-                        ' out-of-order pressure; strict_chemkin)'
+                        ' are out of order (pressures must be'//         &
+                        ' non-decreasing)'
                      write(lout,'(A,I6,A)')                             &
                         ' ERROR...PLOG pressures for reaction ',        &
                         uniq(r),                                        &
-                        ' are not strictly ascending (duplicate or'//   &
-                        ' out-of-order pressure; strict_chemkin)'
+                        ' are out of order (pressures must be'//         &
+                        ' non-decreasing)'
                      kerr = .true.
                      error stop 1
                   endif
@@ -6639,8 +6646,12 @@
                  LTHRM=42, LINC=43, CKMIN=1.0E-3, MAXORD=KDIM,&
                  NOIDIM=MAXORD*IDIM)
 !
-      CHARACTER KNAME(KDIM)*(LSYM), ENAME(MDIM)*(LSYM), SUB(80)*80,&
-                KEY(5)*4, LINE*80, IUNITS*80, AUNITS*4, EUNITS*4,&
+!     Modern yaml2ck output is not restricted to the historical
+!     80-column CHEMKIN card width (real mechanisms contain lines up to
+!     at least 116 characters). Keep thermo-card readers at 80 columns,
+!     but do not truncate mechanism/reaction and auxiliary-data lines.
+      CHARACTER KNAME(KDIM)*(LSYM), ENAME(MDIM)*(LSYM), SUB(80)*256,&
+                KEY(5)*4, LINE*256, IUNITS*80, AUNITS*4, EUNITS*4,&
 !               FILETD holds trim(mechdir)//"therm.dat"; mechdir is
 !               len=256 (chemistry_setup), so 80 silently truncated long
 !               paths and therm.dat could not be opened. Match mechdir.
@@ -6989,10 +7000,9 @@
 
       REWIND LINC
 !     cklink v2: pack the collected PLOG lines into per-reaction arrays
-!     and enforce the strict_chemkin dialect (ascending, no duplicate
-!     pressure). A violation sets KERR, so the gate below writes only a
-!     truncated (magic+header) cklink and STOPs; SCcklink then refuses
-!     it on read (fail-closed).
+!     and enforce non-decreasing pressure order. A violation sets KERR,
+!     so the gate below writes only a truncated (magic+header) cklink
+!     and exits non-zero.
       CALL plog_finalize(KERR, LOUT)
 !     v2 leading record: magic + integer schema version. Positively
 !     identifies the format for the reader (SCcklink) — supersedes the
@@ -7006,7 +7016,7 @@
          ' WARNING...THERE IS AN ERROR IN THE LINKING FILE'
          CLOSE (LINC)
          CLOSE (LOUT)
-         STOP
+         ERROR STOP 1
       ENDIF
 !
       DO 1150 K = 1, KK
@@ -8091,8 +8101,8 @@
 !
       DIMENSION PLOGV(4)   ! scratch for one `PLOG / P A b E /` line
 !
-      CHARACTER SUB(*)*(*), KNAME(*)*(*), KEY*80, RSTR*80,            & ! UPCASE*4,  &
-                ISTR*80
+      CHARACTER SUB(*)*(*), KNAME(*)*(*), KEY*80, RSTR*256,           & ! UPCASE*4,  &
+                ISTR*256
       LOGICAL KERR, LLAN, LRLT, LTHB, LFAL, LTRO, LSRI, LWL, LREV,    &
               LFORD, LRORD, LEIM, LJAN, LFT1, LEXC
 !
@@ -8358,8 +8368,9 @@
 !        Parsed here and accumulated in the plog_collect module (NOT
 !        threaded through the CKAUXL/CKINTP argument lists). The E value
 !        is stored RAW and converted to E/R[K] later in CPREAC via the
-!        same EFAC as PAR(3,II). strict_chemkin pressure-ordering and
-!        duplicate checks run in plog_finalize (all nodes visible).
+!        same EFAC as PAR(3,II). Pressure-ordering checks run in
+!        plog_finalize after all entries are visible; equal-pressure
+!        entries are grouped and summed by the evaluator.
 !
             IF (LTHB .OR. LFAL .OR. LTRO .OR. LSRI .OR. LREV) THEN
                WRITE(*   ,'(A,I0,A)')                                  &

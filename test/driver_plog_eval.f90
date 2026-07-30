@@ -9,6 +9,7 @@
 !   **    - the geometric mean of two adjacent nodes (mid-interval in ln P)                       **
 !   **    - below the lowest node and above the highest node (nearest-endpoint clamp)             **
 !   **    - several temperatures                                                                  **
+!   **    - multiple Arrhenius terms at one pressure (sum before interpolation)                   **
 !   **                                                                                           **
 !   **  The reference k is computed here with the very same closed-form definition the plan       **
 !   **  specifies (log-linear interpolation of ln k in ln P; per-node Arrhenius), but written     **
@@ -89,6 +90,31 @@ program driver_plog_eval
     call check_derivatives('above-max @ 800K', 800.0_dp, 100.0_dp*atm, 0)
     call check_derivatives('node2 right slope @ 1100K', 1100.0_dp, P2*atm, 2)
 
+    ! Standard CHEMKIN grouped PLOG: two Arrhenius terms at 1 atm are
+    ! summed before interpolation to the neighboring pressure nodes.
+    deallocate(plog_reaction, plog_node_ptr, plog_logP, plog_A, plog_b, &
+               plog_EoverR)
+    n_plog_reactions = 1
+    n_plog_nodes     = 4
+    n_plog_terms     = 4
+    allocate(plog_reaction(1), plog_node_ptr(0:1))
+    allocate(plog_logP(4), plog_A(4), plog_b(4), plog_EoverR(4))
+    plog_reaction(1) = IRX
+    plog_node_ptr = [0, 4]
+    plog_logP = [log(P1*atm), log(P2*atm), log(P2*atm), log(P3*atm)]
+    plog_A = [A1, A2, 2.5e11_dp, A3]
+    plog_b = [B1, B2, 0.25_dp, B3]
+    plog_EoverR = [ER1, ER2, 450.0_dp, ER3]
+
+    call check('grouped node @ 1000K', 1000.0_dp, P2*atm, &
+               ref_group(2, 3, 1000.0_dp))
+    call check('grouped geo(1,2) @ 1200K', 1200.0_dp, sqrt(P1*P2)*atm, &
+               ref_group_interp(1, 1, 2, 3, 1200.0_dp, sqrt(P1*P2)*atm))
+    call check('grouped geo(2,3) @ 1200K', 1200.0_dp, sqrt(P2*P3)*atm, &
+               ref_group_interp(2, 3, 4, 4, 1200.0_dp, sqrt(P2*P3)*atm))
+    call check_grouped_derivatives('grouped P=3atm @ 1000K', 1000.0_dp, &
+                                   3.0_dp*atm, 2, 3, 4, 4)
+
     if (nfail == 0) then
         write(*,'(a)') 'RESULT: PASS - all PLOG rate checks within tolerance'
         call exit(0)
@@ -149,6 +175,27 @@ contains
         k = exp(lnk)
     end function ref_interp
 
+    real (dp) function ref_group(first, last, T) result(k)
+        integer, intent(in) :: first, last
+        real (dp), intent(in) :: T
+        integer :: term
+        k = 0.0_dp
+        do term = first, last
+            k = k + ref_node(term, T)
+        enddo
+    end function ref_group
+
+    real (dp) function ref_group_interp(lo_first, lo_last, hi_first, hi_last, &
+                                        T, P_pa) result(k)
+        integer, intent(in) :: lo_first, lo_last, hi_first, hi_last
+        real (dp), intent(in) :: T, P_pa
+        real (dp) :: theta
+        theta = (log(P_pa) - plog_logP(lo_first)) /                    &
+                (plog_logP(hi_first) - plog_logP(lo_first))
+        k = exp((1.0_dp-theta)*log(ref_group(lo_first,lo_last,T)) +    &
+                theta*log(ref_group(hi_first,hi_last,T)))
+    end function ref_group_interp
+
     subroutine check(label, T, P_pa, kref)
         character(len=*), intent(in) :: label
         real (dp),        intent(in) :: T, P_pa, kref
@@ -196,5 +243,32 @@ contains
             nfail = nfail + 1
         endif
     end subroutine check_derivatives
+
+    subroutine check_grouped_derivatives(label, T, P_pa, lo_first, lo_last, &
+                                         hi_first, hi_last)
+        character(len=*), intent(in) :: label
+        real(dp), intent(in) :: T, P_pa
+        integer, intent(in) :: lo_first, lo_last, hi_first, hi_last
+        real(dp) :: k, dkdt, slope, dkdt_fd, slope_ref, ht, rel_t, rel_s
+
+        call lib_derivatives(T,P_pa,k,dkdt,slope)
+        ht = max(1.0e-4_dp,T*1.0e-6_dp)
+        dkdt_fd = (lib_k(T+ht,P_pa*(T+ht)/T) -                    &
+                   lib_k(T-ht,P_pa*(T-ht)/T))/(2.0_dp*ht)
+        slope_ref = (log(ref_group(hi_first,hi_last,T)) -          &
+                     log(ref_group(lo_first,lo_last,T))) /          &
+                    (plog_logP(hi_first)-plog_logP(lo_first))
+        rel_t = abs(dkdt-dkdt_fd)/max(abs(dkdt_fd),tiny(1.0_dp))
+        rel_s = abs(slope-slope_ref)/max(1.0_dp,abs(slope_ref))
+        if (rel_t <= 2.0e-8_dp .and. rel_s <= 1.0e-12_dp) then
+            write(*,'(a,a,a,es10.2,a,es10.2)') '  ok   ',label,       &
+                 ' dT relerr=',rel_t,' slope err=',rel_s
+        else
+            write(*,'(a,a,4(a,es20.12))') '  FAIL ',label,             &
+                 ' dkdt=',dkdt,' dkdt_fd=',dkdt_fd,                    &
+                 ' slope=',slope,' slope_ref=',slope_ref
+            nfail = nfail + 1
+        endif
+    end subroutine check_grouped_derivatives
 
 end program driver_plog_eval

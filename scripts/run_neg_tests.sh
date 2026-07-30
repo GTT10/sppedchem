@@ -53,9 +53,7 @@ DRV_BIN="$TAG/driver_smoke"
 # Each case: "<mechanism dir>|<substring the rejection message must contain>"
 neg_cases=(
   "test/data_neg_ford/|modified species order (FORD/RORD)"
-  # strict_chemkin: duplicate pressure within one PLOG reaction is
-  # rejected by CKINTP (error stop) before a usable cklink is written.
-  "test/data_neg_plog_dup/|not strictly ascending"
+  "test/data_neg_plog_order/|out of order"
   "test/data_neg_plog_a/|must be finite and positive"
   "test/data_neg_plog_rev/|also uses REV/third-body/falloff syntax"
   "test/data_neg_plog_thirdbody/|also uses REV/third-body/falloff syntax"

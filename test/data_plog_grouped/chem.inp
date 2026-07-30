@@ -1,7 +1,5 @@
-! Negative-test mechanism: PLOG with a DUPLICATE pressure node.
-! strict_chemkin dialect (SpeedCHEM default) forbids two PLOG lines at
-! the same pressure within one reaction; CKINTP must reject this with a
-! non-zero exit (error stop), not link it. See README.md.
+! Positive-test mechanism: standard grouped PLOG terms.
+! Two PLOG entries at 1 atm are summed before pressure interpolation.
 ELEMENTS
 H O N
 END
@@ -11,6 +9,8 @@ END
 REACTIONS
 O + H2  = OH + H         5.060E+04   2.67    6290.0
 H + O2 = HO2             1.000E+12   0.00     500.0
+    PLOG /  0.1   5.000E+11   0.10     400.0 /
     PLOG /  1.0   1.000E+12   0.00     500.0 /
     PLOG /  1.0   2.000E+12   0.00     600.0 /
+    PLOG / 10.0   4.000E+12  -0.10     700.0 /
 END
