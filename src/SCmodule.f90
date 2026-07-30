@@ -132,8 +132,8 @@ contains
       implicit none
 
       logical :: present
-      integer :: idummy
-      character(len=15) :: tmpsolver, programme
+      integer :: idummy, env_len, env_stat
+      character(len=15) :: tmpsolver, programme, env_solver
       character(len=*), parameter :: itapeTSS = "itapeTSS",&
       &itapeCH  = "itapeChem"
 
@@ -262,6 +262,18 @@ contains
          Temp_HIlim               = 3500.e0_dp
 
          write(*,fmt_nofile)
+      endif
+
+!      A process-local override is needed by regression harnesses and
+!      embedding applications that compare numerical and analytical
+!      Jacobian solvers without creating a cwd-global itapeChem file.
+!      Apply it before ODE workspace allocation.
+      call get_environment_variable('SC_SOLVER', env_solver, env_len, env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+         call s_cap(env_solver)
+         solver = trim(adjustl(env_solver))
+         analytical_jac = index(trim(solver), 'JAC') > 0
+         if (.not. analytical_jac) simplified_for_sparsity = .false.
       endif
 
 !       ** Output solver setup data to screen **************************
@@ -3696,9 +3708,9 @@ module reacpar
 !        CSR-style pointers:
 !          reaction  -> range of pressure nodes  (plog_node_ptr)
 !          node      -> range of Arrhenius terms (plog_term_ptr)
-!        strict_chemkin dialect keeps exactly one term per node; the
-!        term level exists so permissive_grouped (same-pressure sums)
-!        can be added later without changing the on-disk schema.
+!        cklink v2 stores one entry per Arrhenius term. Adjacent entries
+!        with equal pressure form a node; their rates are summed before
+!        pressure interpolation (standard CHEMKIN/Cantera semantics).
 !        Units (deliberately NEW, to avoid disturbing legacy Ainf/binf/
 !        Einf units and PRF bit-identity):
 !          plog_logP     = log(P[Pa])         (input atm -> Pa -> ln)
@@ -3717,7 +3729,7 @@ module reacpar
 !        a reaction). plog_term_ptr(0:n_plog_nodes): term range per node.
    real (dp)       , dimension(:), allocatable   :: plog_logP
    integer, dimension(:), allocatable            :: plog_term_ptr
-!        Arrhenius terms, one set per term (strict: one term per node).
+!        Arrhenius terms, one set per entry.
    real (dp)       , dimension(:), allocatable   :: plog_A
    real (dp)       , dimension(:), allocatable   :: plog_b
    real (dp)       , dimension(:), allocatable   :: plog_EoverR
@@ -3777,7 +3789,9 @@ contains
 !         Ainf, so k_i lands in the same cm-mol-s units as kinf; E/R is
 !         already in K, so no Rcal factor is needed here.)
 !
-!        Interpolation (strict_chemkin, log-linear in ln P):
+!        At a pressure node with multiple entries, k_i and dk_i/dT are
+!        sums over all Arrhenius terms at that pressure. Interpolation
+!        is then log-linear in ln P:
 !          lnP <= lnP_1        -> k = k_1                 (nearest end)
 !          lnP >= lnP_last     -> k = k_last              (nearest end)
 !          lnP_j <= lnP < lnP_{j+1}:
@@ -3794,7 +3808,7 @@ contains
       real (dp), dimension(:), intent(inout) :: kinf ! rate constants (nr)
       real (dp), dimension(:), intent(inout), optional :: dkinfdT
       real (dp), dimension(:), intent(inout), optional :: dlnk_dlnP
-      integer :: r, ir, j0, j1, nlo, nhi, node
+      integer :: r, ir, j0, j1, nlo, nhi, node, node_end, last_node
       real (dp) :: lnP, lnT, uT, theta, lnk, lnk0, lnk1,            &
                    g, g0, g1, slope
 
@@ -3815,42 +3829,44 @@ contains
          ir  = plog_reaction(r)
          nlo = plog_node_ptr(r-1) + 1   ! first node of reaction r
          nhi = plog_node_ptr(r)         ! last  node of reaction r
+         node_end = plog_group_end(nlo, nhi)
+         last_node = nlo
+         do while (plog_group_end(last_node, nhi) < nhi)
+            last_node = plog_group_end(last_node, nhi) + 1
+         enddo
 
          slope = 0.0_dp
-         if (nhi <= nlo) then
+         if (node_end >= nhi) then
 !           Single pressure node: pressure-independent Arrhenius at k_1.
-            lnk = plog_node_lnk(nlo, lnT, uT)
-            g   = plog_node_dlnkdT(nlo, uT)
+            call plog_group_lnk_dlnkdT(nlo, node_end, lnT, uT, lnk, g)
 
          else if (lnP < plog_logP(nlo)) then
 !           Below the lowest node -> nearest endpoint (s = 0). Equality
 !           uses the first interval, matching the right-continuous
 !           convention used at every interior node.
-            lnk = plog_node_lnk(nlo, lnT, uT)
-            g   = plog_node_dlnkdT(nlo, uT)
+            call plog_group_lnk_dlnkdT(nlo, node_end, lnT, uT, lnk, g)
 
-         else if (lnP >= plog_logP(nhi)) then
+         else if (lnP >= plog_logP(last_node)) then
 !           At or above the highest node -> nearest endpoint (s = 0).
-            lnk = plog_node_lnk(nhi, lnT, uT)
-            g   = plog_node_dlnkdT(nhi, uT)
+            call plog_group_lnk_dlnkdT(last_node, nhi, lnT, uT, lnk, g)
 
          else
 !           Locate the bracketing interval [j0, j1] with
 !           logP(j0) <= lnP < logP(j1). Right-continuous at a node:
 !           when lnP == logP(node) exactly, the loop stops with j0=node.
             j0 = nlo
-            do node = nlo, nhi-1
-               if (lnP >= plog_logP(node) .and. lnP < plog_logP(node+1)) then
-                  j0 = node
+            do
+               node_end = plog_group_end(j0, nhi)
+               j1 = node_end + 1
+               if (lnP >= plog_logP(j0) .and. lnP < plog_logP(j1)) then
                   exit
                endif
-            end do
-            j1 = j0 + 1
+               j0 = j1
+            enddo
 
-            lnk0  = plog_node_lnk(j0, lnT, uT)
-            lnk1  = plog_node_lnk(j1, lnT, uT)
-            g0    = plog_node_dlnkdT(j0, uT)
-            g1    = plog_node_dlnkdT(j1, uT)
+            call plog_group_lnk_dlnkdT(j0, node_end, lnT, uT, lnk0, g0)
+            call plog_group_lnk_dlnkdT(j1, plog_group_end(j1, nhi),   &
+                                       lnT, uT, lnk1, g1)
             theta = (lnP - plog_logP(j0)) /                            &
                     (plog_logP(j1) - plog_logP(j0))
             lnk   = (1.0_dp - theta)*lnk0 + theta*lnk1
@@ -3866,6 +3882,46 @@ contains
          if (present(dlnk_dlnP)) dlnk_dlnP(ir) = slope
       end do
    end subroutine plog_kinf_eval
+
+!        Return the final entry of the pressure group beginning at
+!        `first`. The tolerance matches parse/read validation.
+   integer function plog_group_end(first, last) result(group_last)
+      use working_precision, only: dp
+      implicit none
+      integer, intent(in) :: first, last
+      real (dp), parameter :: logp_tol = 1.0e-9_dp
+      group_last = first
+      do while (group_last < last)
+         if (abs(plog_logP(group_last+1) - plog_logP(first)) > logp_tol) exit
+         group_last = group_last + 1
+      enddo
+   end function plog_group_end
+
+!        Stable log-sum-exp evaluation for all Arrhenius terms at one
+!        pressure, plus the exact temperature derivative of ln(sum k).
+   subroutine plog_group_lnk_dlnkdT(first, last, lnT, uT, lnk, g)
+      use working_precision, only: dp
+      implicit none
+      integer,   intent(in)  :: first, last
+      real (dp), intent(in)  :: lnT, uT
+      real (dp), intent(out) :: lnk, g
+      integer :: term
+      real (dp) :: lnk_max, weight, weight_sum, g_sum
+
+      lnk_max = plog_node_lnk(first, lnT, uT)
+      do term = first + 1, last
+         lnk_max = max(lnk_max, plog_node_lnk(term, lnT, uT))
+      enddo
+      weight_sum = 0.0_dp
+      g_sum = 0.0_dp
+      do term = first, last
+         weight = exp(plog_node_lnk(term, lnT, uT) - lnk_max)
+         weight_sum = weight_sum + weight
+         g_sum = g_sum + weight*plog_node_dlnkdT(term, uT)
+      enddo
+      lnk = lnk_max + log(weight_sum)
+      g = g_sum/weight_sum
+   end subroutine plog_group_lnk_dlnkdT
 
 !        Logarithmic node rate avoids underflow before interpolation.
    real (dp) function plog_node_lnk(node, lnT, uT)
