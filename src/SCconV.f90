@@ -527,13 +527,14 @@
 !     constV_energy
       real (dp)        :: urho, coefs(5)
 
-      integer :: j,i,k,isp,ire,idqdY
+      integer :: j,i,k,isp,idqdY
       real (dp)        :: frac,tenthT
 
 !     PART 1 - DERIVATIVES WITH RESPECT TO TEMPERATURE ****************
       real (dp)                              :: dT_dT
       real (dp)       , dimension(nr)        :: dkinfdT, dkbdT
       real (dp)       , dimension(nr)        :: plog_dlnk_dlnP
+      real (dp)       , dimension(nr)        :: plog_dq_dlnP
       real (dp)       , dimension(ntbFALL)   :: dk0dTs, k0s
       real (dp)       , dimension(ntbFALL)   :: dk0dT, k0, k0M
       real (dp)       , dimension(nr)        :: dq_dT
@@ -554,9 +555,11 @@
 !     Factor for Three-body reactions
       real (dp)       , dimension(:,:), allocatable :: dMeff_dY
       real (dp)                                     :: C_pow_nu
-      real (dp)                                     :: plog_dq
       real (dp)       , dimension(neq-1)            :: dlogP_dY
+      real (dp)       , dimension(ns)               :: plog_dY_dlnP
       real (dp)       , dimension(neq-1), target    :: YY
+      logical          , dimension(nr)               :: plog_reaction_mask
+      logical          , dimension(ns)               :: plog_output_row
 
 !     PART 3 - TEMPERATURE DERIVATIVES WITH RESPECT TO SPECIES ********
       real (dp)       , dimension(neq-1)         :: JACYYT_UuMW
@@ -931,38 +934,93 @@
 
       call sparse_row_prod_valonly(dq_dY_sparse, uY)
 
-!     PLOG composition coupling. At fixed rho,T for an ideal gas,
-!       dlnP/dY_j = (1/W_j) / sum_i(Y_i/W_i).
-!     The rate contribution to dq/dY is q*dlnk/dlnP*dlnP/dY. This is
-!     structurally dense across all species for every PLOG reaction,
-!     including equilibrium-reversible reactions because forward and
-!     reverse rates share the same PLOG multiplier.
-      if (n_plog_reactions > 0) then
-         dlogP_dY = uMW / sum(Y*uMW)
-         ire = 1
-         do i = 1, nr
-            if (ire > n_plog_reactions) cycle
-            if (plog_reaction(ire) /= i) cycle
-            do j = 1, ns
-               plog_dq = q(i)*plog_dlnk_dlnP(i)*dlogP_dY(j)
-!                 Preserve the state-independent symbolic pattern even
-!                 at a clamped pressure or instantaneous q=0 state.
-               if (abs(plog_dq) < small) plog_dq = sign(small,plog_dq)
-               call add_value(dq_dY_sparse,i,j,                       &
-                  sparse_value(dq_dY_sparse,i,j) + plog_dq)
-            enddo
-            ire = ire + 1
-         enddo
-      endif
-
       if (ntbALL > 0) then
          tmp_sp = sparse_partial_sum(dq_dY_sparse,dFTL_dY_sp,itbALL)
          dq_dY_sparse = tmp_sp
       endif
 
 !     RETRIEVING SPARSE FORMULATION FOR JACYY_SPARSE MATRIX
-      if (.not.sparse_jac) call sparse_symbolic_mm(nudiffT_molarv_sparse, dq_dY_sparse, JACYY_sparse)
+!     PLOG composition coupling is a rank-one update after multiplication
+!     by the species stoichiometry matrix:
+!       dYdot/dY = (nudiff*q*dlnk/dlnP) outer (dlnP/dY).
+!     Build the union of the ordinary symbolic pattern and dense rows for
+!     species changed by PLOG reactions once, then update its values directly.
+!     This avoids inserting n_plog_reactions*ns sparse entries, which caused
+!     repeated array growth and copying on every Jacobian evaluation.
+      if (.not.sparse_jac) then
+         if (n_plog_reactions > 0) then
+            call sparse_symbolic_mm(nudiffT_molarv_sparse, dq_dY_sparse, tmp_sp)
+            plog_reaction_mask = .false.
+            plog_reaction_mask(plog_reaction) = .true.
+            plog_output_row = .false.
+            do i = 1, ns
+               do k = nudiffT_molarv_sparse%IA(i), &
+                      nudiffT_molarv_sparse%IA(i+1)-1
+                  if (plog_reaction_mask(nudiffT_molarv_sparse%JA(k))) then
+                     plog_output_row(i) = .true.
+                     exit
+                  endif
+               enddo
+            enddo
+
+            idqdY = 0
+            do i = 1, ns
+               if (plog_output_row(i)) then
+                  idqdY = idqdY + ns
+               else
+                  idqdY = idqdY + tmp_sp%IA(i+1) - tmp_sp%IA(i)
+               endif
+            enddo
+            call allocate(ns,ns,idqdY,JACYY_sparse)
+            JACYY_sparse%A = zero
+            JACYY_sparse%IA(1) = 1
+            idqdY = 1
+            do i = 1, ns
+               if (plog_output_row(i)) then
+                  JACYY_sparse%JA(idqdY:idqdY+ns-1) = [(j,j=1,ns)]
+                  idqdY = idqdY + ns
+               else
+                  j = tmp_sp%IA(i+1) - tmp_sp%IA(i)
+                  JACYY_sparse%JA(idqdY:idqdY+j-1) = &
+                     tmp_sp%JA(tmp_sp%IA(i):tmp_sp%IA(i+1)-1)
+                  idqdY = idqdY + j
+               endif
+               JACYY_sparse%IA(i+1) = idqdY
+            enddo
+         else
+            call sparse_symbolic_mm(nudiffT_molarv_sparse, dq_dY_sparse, JACYY_sparse)
+         endif
+      endif
       call sparse_2_matmul(nudiffT_molarv_sparse, dq_dY_sparse, JACYY_sparse)
+
+!     At fixed rho,T for an ideal gas,
+!       dlnP/dY_j = (1/W_j) / sum_i(Y_i/W_i).
+!     Forward and reverse rates share the same PLOG multiplier, so q is the
+!     net rate of progress here, including equilibrium-reversible reactions.
+      if (n_plog_reactions > 0) then
+         plog_dq_dlnP = zero
+         do i = 1, n_plog_reactions
+            j = plog_reaction(i)
+            plog_dq_dlnP(j) = q(j)*plog_dlnk_dlnP(j)
+         enddo
+         plog_dY_dlnP = nudiffT_molarv_sparse * plog_dq_dlnP
+         dlogP_dY = uMW / sum(Y*uMW)
+         do i = 1, ns
+            do k = JACYY_sparse%IA(i), JACYY_sparse%IA(i+1)-1
+               j = JACYY_sparse%JA(k)
+               JACYY_sparse%A(k) = JACYY_sparse%A(k) + &
+                  plog_dY_dlnP(i)*dlogP_dY(j)
+            enddo
+         enddo
+      endif
+
+!     Preserve every entry in the one-time PLOG union pattern even when the
+!     initial state has zero pressure slope or rate. JAC_sparse is assembled
+!     from numerical values on this first call and reuses that structure later.
+      if (.not.sparse_jac .and. n_plog_reactions > 0) then
+         where (abs(JACYY_sparse%A) < small) &
+            JACYY_sparse%A = sign(small,JACYY_sparse%A)
+      endif
 
 !     ** PART 3 - TEMPERATURE DERIVATIVES WITH RESPECT TO SPECIES *****
 !     JACTY = d(dT/dt)/dY [K/s]
@@ -1739,9 +1797,4 @@
 
 
       end subroutine conV_integrate
-
-
-
-
-
 

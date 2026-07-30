@@ -60,19 +60,28 @@ echo "[3/6] Converting the exact staged CHEMKIN pair for Cantera..."
   --output="$stage_dir/reference.yaml" --permissive \
   >"$stage_dir/ck2yaml.log" 2>&1
 
+real_nout=${SC_REAL_NOUT:-240}
 echo "[4/6] Running numerical-Jacobian ignition history..."
-SC_MECHDIR="$stage_dir/" SC_SOLVER=LSODES SC_NOUT="${SC_REAL_NOUT:-240}" \
+SC_MECHDIR="$stage_dir/" SC_SOLVER=LSODES SC_NOUT="$real_nout" \
   OMP_NUM_THREADS=1 "$stage_dir/driver_history" >"$stage_dir/numeric.log"
 grep '^SUMMARY' "$stage_dir/numeric.log"
 
 analytic_args=()
 if [[ ${SC_RUN_HEAVY_ANALYTIC:-0} == 1 ]]; then
-  echo "      Running heavy analytical-Jacobian cross-check..."
+  analytic_nout=${SC_REAL_ANALYTIC_NOUT:-$real_nout}
+  echo "      Running analytical-Jacobian cross-check..."
   SC_MECHDIR="$stage_dir/" SC_SOLVER=LSODESJAC \
-    SC_NOUT="${SC_REAL_ANALYTIC_NOUT:-12}" OMP_NUM_THREADS=1 \
+    SC_NOUT="$analytic_nout" OMP_NUM_THREADS=1 \
     "$stage_dir/driver_history" >"$stage_dir/analytic.log"
   grep '^SUMMARY' "$stage_dir/analytic.log"
   analytic_args=(--analytic "$stage_dir/analytic.log")
+  if [[ $analytic_nout == "$real_nout" ]]; then
+    numeric_cpu=$(awk -F, '/^SUMMARY/{print $8}' "$stage_dir/numeric.log")
+    analytic_cpu=$(awk -F, '/^SUMMARY/{print $8}' "$stage_dir/analytic.log")
+    speedup=$(awk -v numeric="$numeric_cpu" -v analytic="$analytic_cpu" \
+      'BEGIN { printf "%.6f", numeric/analytic }')
+    echo "BENCHMARK,nout,$real_nout,numeric_cpu_s,$numeric_cpu,analytic_cpu_s,$analytic_cpu,numeric_over_analytic,$speedup"
+  fi
 fi
 
 echo "[5/6] Comparing IDT, dT/dt, T/P history, and major species..."
