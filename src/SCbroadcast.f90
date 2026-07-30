@@ -280,12 +280,11 @@ subroutine SCbroadcast
    call mpi_broadcast(Troereac)
    call mpi_broadcast(Revreac )
 
-!  PLOG (cklink v2, stage 1 plumbing): per-reaction rate-form tag plus
+!  PLOG (cklink v2): per-reaction rate-form tag plus
 !  the packed pressure-dependent-Arrhenius arrays. Scalars first so
 !  workers know the sizes; the array broadcasts preserve lbounds, so the
-!  0-based *_ptr arrays keep their CSR indexing. (A no-PLOG mechanism
-!  broadcasts empty/zero data and never uses it; PLOG mechanisms are
-!  refused before integration in stage 1, so this is forward-plumbing.)
+!  0-based *_ptr arrays keep their CSR indexing. A no-PLOG mechanism
+!  broadcasts empty/zero data and never uses it.
    call mpi_broadcast(rate_form)
    call mpi_broadcast(n_plog_reactions)
    call mpi_broadcast(n_plog_nodes)
@@ -406,5 +405,4 @@ subroutine SCbroadcast
 
 !     *****************************************************************
 end subroutine SCbroadcast
-
 

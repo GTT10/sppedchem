@@ -62,7 +62,6 @@
                                         mlmas, idfx, daspkinfo, maxk
       use chemistry_setup,        only: solver, permutate_species,   &
                                         accurate_scthermo
-      use reacpar,                only: n_plog_reactions
       use sparse_chemistry,       only: JAC_sparse, JACT_sparse
       use dvode_f90_m,            only: dvode_f90, vode_opts,    &
                                         USERSETS_IAJA, set_opts, &
@@ -116,24 +115,6 @@
       if (neq /= ns + 1) then
          write(*,"(' ERROR chemistry_ODE_integrate: neq (',I0,') /= ns+1"//&
                   " (',I0,'). The state must be [T, Y_1..Y_ns].')") neq, ns+1
-         error stop 1
-      endif
-
-!     PLOG + analytic Jacobian guard (stage 2 = numeric Jacobian only).
-!     PLOG forward rates ARE evaluated in the RHS (mass_action), so
-!     numeric-Jacobian solvers integrate PLOG correctly. The analytic
-!     Jacobian (constV_jac_sparse) does NOT yet include the PLOG
-!     temperature/pressure derivative (stage 3), so a "...JAC" solver
-!     would silently use a wrong Jacobian. Refuse rather than integrate
-!     with an inconsistent Jacobian. (The check is on the solver name
-!     containing "JAC"; the numeric sparse "...S" solvers are fine.)
-      if (n_plog_reactions > 0 .and. index(solver, "JAC") > 0) then
-         write(*,"(' ERROR chemistry_ODE_integrate: solver ',A,' uses the"//&
-                  " analytic Jacobian, but ',I0,' PLOG reaction(s) are"//    &
-                  " present and the analytic PLOG Jacobian is not"//         &
-                  " implemented yet (stage 3). Use a numeric-Jacobian"//     &
-                  " solver (e.g. LSODES/VODE without the JAC suffix).')")     &
-                  trim(solver), n_plog_reactions
          error stop 1
       endif
 
@@ -999,7 +980,8 @@
                                   accurate_scthermo,                      &
                                   check_reaction_mechanism,               &
 !ck2015                                  permutate_species
-                                  permutate_species, mechdir
+                                  permutate_species, mechdir,              &
+                                  simplified_for_sparsity
       use speedchem,        only: ns, nr, neq, scmechanism_to_file,       &
                                   init_stoich_indices,                    &
                                   scmechanism_to_chemkin,                 &
@@ -1016,8 +998,9 @@
                                   check_janaf_polynomials
       use sparse_chemistry, only: permutate_sparse_matrices
       use SCmixturethermo,  only: SCP, SCrho
-      use reacpar,          only: init_reaction_indices, &
-                                  tabulate_equilibrium
+      use reacpar,          only: init_reaction_indices,                  &
+                                  tabulate_equilibrium, n_plog_reactions, &
+                                  plog_reaction
       use troepar,          only: init_thirdbody_indices, &
                                   tabulate_troepars
       use kinetics_mod,     only: tabulate_kinetics, permutate_kinetics
@@ -1039,6 +1022,7 @@
       integer          :: i, j, dummynJ=0, dummyn1=0, dummyn2=0
       logical          :: present, present_CK1, present_CK2, present_CKascii,    &
                           present_CKtherm, ckinp_run = .false.
+      logical, dimension(:), allocatable :: forward_active
       real (dp), dimension(:)  , allocatable :: dummyy, dummydyindt
       real (dp), dimension(:,:), allocatable :: dummyjac
 
@@ -1109,13 +1093,26 @@
          call SCsetup
       endif
 
+!     PLOG pressure coupling is dense in species space. Keep the whole
+!     analytic Jacobian exact while PLOG is active; silently retaining
+!     the legacy simplified third-body pattern would make a finite-
+!     difference comparison ambiguous and can omit real couplings.
+      if (n_plog_reactions > 0 .and. simplified_for_sparsity) then
+         simplified_for_sparsity = .false.
+         write(*,"(' PLOG: using complete analytic Jacobian sparsity.')")
+      endif
+
 !     Initialize sparse chemistry algebra
 !      call init_stoich_indices
       call init_reaction_indices
       call init_thirdbody_indices
 !      if (accurate_scthermo) call store_thermo_coeffs
 !     Compute mechanism's sparse matrices
-      call sparse_chemistry_setup(inotrev,nnotrev,Ainf)
+      allocate(forward_active(nr))
+      forward_active = (Ainf /= 0.0_dp)
+      if (n_plog_reactions > 0) forward_active(plog_reaction) = .true.
+      call sparse_chemistry_setup(inotrev,nnotrev,forward_active)
+      deallocate(forward_active)
 
 !     Compute stoichiometry: species and element invariants
       call element_matrix
