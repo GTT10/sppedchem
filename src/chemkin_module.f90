@@ -8748,11 +8748,13 @@
                 IREV(*), ITHB(*), ILAN(*), IRLT(*), IRNU(*),        &
                 RNU(MAXSP,*)
       CHARACTER*(*) AUNITS, EUNITS
-      LOGICAL IERR,KERR,LREV,LLAN,LRLT
+      LOGICAL IERR,KERR,LREV,LLAN,LRLT,LREAL
 !
-!ck2015       IF (NRNU.GT.0) THEN
-!ck2015          IF (II.EQ.IRNU(NRNU)) &
-      IF (NRNU.GT.0 .AND. II.EQ.IRNU(NRNU)) THEN
+!     Fortran does not guarantee short-circuit evaluation of .AND.;
+!     do not form IRNU(0) when no real-stoichiometry reaction exists.
+      LREAL = .FALSE.
+      IF (NRNU.GT.0) LREAL = II.EQ.IRNU(NRNU)
+      IF (LREAL) THEN
          CALL CKRBAL (MAXSP, NUNK(1,II), RNU(1,NRNU), MDIM, MM, KCHRG,&
                       KNCF, CKMIN, IERR)
       ELSE

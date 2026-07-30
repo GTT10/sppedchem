@@ -383,21 +383,21 @@ module sparse_chemistry
 !         type(sparse)            :: ijac_sparse
    type(sparse), target    :: JAC_sparse
    type(sparse)            :: JACT_sparse
-!$ OMP THREADPRIVATE(JAC_SPARSE,JACT_sparse)
+!$OMP THREADPRIVATE(JAC_SPARSE,JACT_sparse)
 
 !        Species vs species subpart of the jacobian matrix
 !        JACYY(:,:) = JAC(2:neq, 2:neq); JACYYT = transpose(JACYY)
    type(sparse)    :: JACYY_sparse, JACYYT_sparse
-!$ OMP THREADPRIVATE(JACYY_sparse,JACYYT_sparse)
+!$OMP THREADPRIVATE(JACYY_sparse,JACYYT_sparse)
 
 !        Premultiplied nudiff * molar volume = nudiff * MW / rho
    type(sparse)    :: nudiffT_molarv_sparse
-!$ OMP THREADPRIVATE(nudiffT_molarv_sparse)
+!$OMP THREADPRIVATE(nudiffT_molarv_sparse)
 
 !        Derivative of reaction progress variable with respect to
 !        species mass fractions dq_dY [nr x ns]
    type(sparse)    :: dq_dY_sparse, dq_dY_T_sparse
-!$ OMP THREADPRIVATE(dq_dY_sparse, dq_dY_T_sparse)
+!$OMP THREADPRIVATE(dq_dY_sparse, dq_dY_T_sparse)
 
 !        Third-body enhanced molecularity coefficients [ntbALL x ns]
    type(sparse)    :: third_body_sp
@@ -605,7 +605,7 @@ module speedchem
 !      integer, dimension(:,:), allocatable :: ijac, ijacYY
    logical, dimension(:,:), allocatable :: ljac
    integer, dimension(:),   allocatable :: rowjac, coljac
-!$ OMP THREADPRIVATE(sparse_jac,njac, rowjac, coljac, ljac)
+!$OMP THREADPRIVATE(sparse_jac,njac, rowjac, coljac, ljac)
 
 !     ** Index of the oxidizer within the species array
    integer :: iO2
@@ -1358,7 +1358,7 @@ module find_mod
    integer, allocatable, public :: i2D1(:),i2D2(:)
 
 
-!$ OMP THREADPRIVATE(indices,i2D1,i2D2)
+!$OMP THREADPRIVATE(indices,i2D1,i2D2)
 contains
 
    subroutine find_indices(mask)
@@ -3023,9 +3023,9 @@ module SCmixturethermo
    public
 
    real (dp)        :: MWm, Rm, cp, cv, h, e
-!$ OMP THREADPRIVATE(cp,cv)
+!$OMP THREADPRIVATE(cp,cv)
    real (dp)       , target :: SCP, SCrho
-!$ OMP THREADPRIVATE(SCP,SCrho)
+!$OMP THREADPRIVATE(SCP,SCrho)
 
 
 contains
@@ -4357,7 +4357,7 @@ module kinetics_mod
 !     Arrays for saved data for the Jacobian matrix
    real (dp)       , dimension(:), allocatable :: save_k0, save_kinf
    logical                                     :: lsavek = .false.
-!$ OMP THREADPRIVATE(save_k0, save_kinf, lsavek)
+!$OMP THREADPRIVATE(save_k0, save_kinf, lsavek)
 
 
 !     Array for storing species rates of change
@@ -5363,20 +5363,20 @@ module ode_solver
 
 !       Array length parameters
    integer :: lrw, liw
-!OMP    THREADPRIVATE(lrw,liw)
+!$OMP   THREADPRIVATE(lrw,liw)
 
 !       Integration method parameters and option switches
    integer :: method, itol, iopt, itask, istate, ijac, imas, iout,&
    &ifcn, idfx, mumas, mlmas, mujac, mljac, maxk
-!$ OMP   THREADPRIVATE(method,itol,iopt,itask,istate,ijac,imas,iout,ifcn,
-!$ OMP&  idfx,mumas,mlmas,mujac,mljac,maxk)
+!$OMP   THREADPRIVATE(method,itol,iopt,itask,istate,ijac,imas,iout,ifcn,&
+!$OMP&  idfx,mumas,mlmas,mujac,mljac,maxk)
 
 !       Runtime parameters
    integer :: maxnsteps
    real (dp)                                   :: hs
    real (dp)                                   :: rtol
    real (dp)       , dimension(:), allocatable :: atol
-!$ OMP   THREADPRIVATE(maxnsteps, hs, rtol, atol)
+!$OMP   THREADPRIVATE(maxnsteps, hs, rtol, atol)
 
 
 !       Fortran 90 implementation of VODE related data
@@ -5384,12 +5384,12 @@ module ode_solver
    integer,          dimension(31) :: istats
    double precision, dimension(22) :: rstats
    integer                         :: nIA, nJA, nPD, nVF90JAC
-!$ OMP   THREADPRIVATE(vf90_opts,istats,rstats,nIA,nJA,nPD,nVF90JAC)
+!$OMP   THREADPRIVATE(vf90_opts,istats,rstats,nIA,nJA,nPD,nVF90JAC)
 
 !       Working arrays
    real (dp)       , dimension(:), allocatable :: rwork
    integer,          dimension(:), allocatable :: iwork
-!$ OMP   THREADPRIVATE(rwork,iwork)
+!$OMP   THREADPRIVATE(rwork,iwork)
 
 !       Working arrays for RADAU5 sparse matrices storage
    integer,          dimension(:), allocatable :: iper1, iiper1
@@ -5404,12 +5404,12 @@ module ode_solver
    type(sparse)         :: JACT_VF90
    type(sparse_ordered) :: R5_sys1, R5_sys2, DASPK_sys
 
-!$ OMP   THREADPRIVATE(iper1,iiper1,iper2,iiper2,iLU1,iLU2,rLU1,rLU2,
-!$ OMP&                liLU1,lrLU1,liLU2,lrLU2,strg1,strg2)
+!$OMP   THREADPRIVATE(iper1,iiper1,iper2,iiper2,iLU1,iLU2,rLU1,rLU2,&
+!$OMP&                liLU1,lrLU1,liLU2,lrLU2,strg1,strg2)
 
 !       Option array for DASPK ode solver
    integer,          dimension(20)             :: daspkinfo
-!$ OMP   THREADPRIVATE(daspkinfo)
+!$OMP   THREADPRIVATE(daspkinfo)
 
 !       --- Integration monitoring arrays ---
 !       Calls to the ODE and to the jacobian routine

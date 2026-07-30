@@ -941,17 +941,17 @@
          dlogP_dY = uMW / sum(Y*uMW)
          ire = 1
          do i = 1, nr
-            if (ire <= n_plog_reactions .and. plog_reaction(ire) == i) then
-               do j = 1, ns
-                  plog_dq = q(i)*plog_dlnk_dlnP(i)*dlogP_dY(j)
+            if (ire > n_plog_reactions) cycle
+            if (plog_reaction(ire) /= i) cycle
+            do j = 1, ns
+               plog_dq = q(i)*plog_dlnk_dlnP(i)*dlogP_dY(j)
 !                 Preserve the state-independent symbolic pattern even
 !                 at a clamped pressure or instantaneous q=0 state.
-                  if (abs(plog_dq) < small) plog_dq = sign(small,plog_dq)
-                  call add_value(dq_dY_sparse,i,j,                    &
-                     sparse_value(dq_dY_sparse,i,j) + plog_dq)
-               enddo
-               ire = ire + 1
-            endif
+               if (abs(plog_dq) < small) plog_dq = sign(small,plog_dq)
+               call add_value(dq_dY_sparse,i,j,                       &
+                  sparse_value(dq_dY_sparse,i,j) + plog_dq)
+            enddo
+            ire = ire + 1
          enddo
       endif
 
@@ -1739,8 +1739,6 @@
 
 
       end subroutine conV_integrate
-
-
 
 
 

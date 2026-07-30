@@ -61,6 +61,8 @@ PLOG **forward rate constants are evaluated** by `reacpar::plog_kinf_eval(Ta, P_
 
 `scripts/run_reload_tests.sh` stages the bundled PRF and compact PLOG mechanisms and checks an A → finalize → B → finalize → A sequence with both `LSODESJAC` and pointer-owning `VODESJAC` setup. The reloaded A dimensions, RHS, and short integration must match the first load exactly, and a repeated finalization must leave all inspected state unallocated.
 
+`scripts/run_openmp_reload_tests.sh` performs the same lifecycle check with an isolated `-qopenmp -check bounds` build and two OpenMP threads. It does not overwrite the canonical `ifx/` build.
+
 ### Critical: compile order is fixed and must not change
 
 The source files have inter-module dependencies but there is **no dependency-graph build** — modules are compiled in one hard-coded serial order. This exact order is duplicated in two places and must be kept in sync: the `SRCS` list in [Makefile](Makefile) and `scripts/ifx.sh`. Key constraints:
