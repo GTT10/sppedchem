@@ -1,5 +1,5 @@
 !   ***********************************************************************************************
-!   **  SpeedCHEM PLOG rate-evaluation unit test  (stage 2)                                       **
+!   **  SpeedCHEM PLOG rate and analytic-derivative unit test                                    **
 !   **                                                                                           **
 !   **  Exercises reacpar::plog_kinf_eval in isolation -- no mechanism file, no sparse setup,     **
 !   **  no integration. It populates the packed PLOG arrays by hand for a single 3-node PLOG      **
@@ -35,7 +35,7 @@ program driver_plog_eval
     real (dp), parameter :: P2 = 1.0_dp,  A2 = 1.0e12_dp, B2 = 0.00_dp, ER2 = 250.0_dp
     real (dp), parameter :: P3 = 10.0_dp, A3 = 1.0e13_dp, B3 =-0.10_dp, ER3 = 350.0_dp
 
-    real (dp) :: kinf(NR_TEST)
+    real (dp) :: kinf(NR_TEST), dkinfdT(NR_TEST), dlnk_dlnP(NR_TEST)
     real (dp) :: Ta(6)
     integer   :: nfail
     real (dp), parameter :: rtol = 1.0e-12_dp
@@ -83,6 +83,12 @@ program driver_plog_eval
     call check('just>node2 @ 1100K', 1100.0_dp, 1.001_dp*atm, &
                ref_interp(2, 1100.0_dp, 1.001_dp*atm))
 
+    ! Exact analytic derivatives used by the constant-volume Jacobian.
+    call check_derivatives('P=3atm @ 1000K', 1000.0_dp, 3.0_dp*atm, 2)
+    call check_derivatives('below-min @ 800K', 800.0_dp, 0.01_dp*atm, 0)
+    call check_derivatives('above-max @ 800K', 800.0_dp, 100.0_dp*atm, 0)
+    call check_derivatives('node2 right slope @ 1100K', 1100.0_dp, P2*atm, 2)
+
     if (nfail == 0) then
         write(*,'(a)') 'RESULT: PASS - all PLOG rate checks within tolerance'
         call exit(0)
@@ -106,6 +112,24 @@ contains
         call plog_kinf_eval(Ta, P_pa, kinf)
         k = kinf(IRX)
     end function lib_k
+
+    subroutine lib_derivatives(T, P_pa, k, dkdt, slope)
+        real(dp), intent(in)  :: T, P_pa
+        real(dp), intent(out) :: k, dkdt, slope
+        Ta(1) = T
+        Ta(2) = T*T
+        Ta(3) = Ta(2)*T
+        Ta(4) = Ta(3)*T
+        Ta(5) = 1.0_dp/T
+        Ta(6) = log(T)
+        kinf = -1.0_dp
+        dkinfdT = -1.0_dp
+        dlnk_dlnP = -1.0_dp
+        call plog_kinf_eval(Ta, P_pa, kinf, dkinfdT, dlnk_dlnP)
+        k = kinf(IRX)
+        dkdt = dkinfdT(IRX)
+        slope = dlnk_dlnP(IRX)
+    end subroutine lib_derivatives
 
     ! Reference single-node Arrhenius rate: A * exp(b*lnT - (E/R)/T).
     real (dp) function ref_node(node, T) result(k)
@@ -140,5 +164,37 @@ contains
             nfail = nfail + 1
         end if
     end subroutine check
+
+    subroutine check_derivatives(label, T, P_pa, interval)
+        character(len=*), intent(in) :: label
+        real(dp), intent(in) :: T, P_pa
+        integer, intent(in) :: interval
+        real(dp) :: k, dkdt, slope, dkdt_fd, slope_ref
+        real(dp) :: ht, rel_t, rel_s
+
+        call lib_derivatives(T,P_pa,k,dkdt,slope)
+        ht = max(1.0e-4_dp,T*1.0e-6_dp)
+        ! Constant volume and composition imply P(T+dT)=P*Tnew/T.
+        dkdt_fd = (lib_k(T+ht,P_pa*(T+ht)/T) -                    &
+                   lib_k(T-ht,P_pa*(T-ht)/T))/(2.0_dp*ht)
+        if (interval == 0) then
+            slope_ref = 0.0_dp
+        else
+            slope_ref = (log(ref_node(interval+1,T)) -             &
+                         log(ref_node(interval,T))) /               &
+                        (plog_logP(interval+1)-plog_logP(interval))
+        endif
+        rel_t = abs(dkdt-dkdt_fd)/max(abs(dkdt_fd),tiny(1.0_dp))
+        rel_s = abs(slope-slope_ref)/max(1.0_dp,abs(slope_ref))
+        if (rel_t <= 2.0e-8_dp .and. rel_s <= 1.0e-12_dp) then
+            write(*,'(a,a,a,es10.2,a,es10.2)') '  ok   ',label,       &
+                 ' dT relerr=',rel_t,' slope err=',rel_s
+        else
+            write(*,'(a,a,4(a,es20.12))') '  FAIL ',label,             &
+                 ' dkdt=',dkdt,' dkdt_fd=',dkdt_fd,                    &
+                 ' slope=',slope,' slope_ref=',slope_ref
+            nfail = nfail + 1
+        endif
+    end subroutine check_derivatives
 
 end program driver_plog_eval

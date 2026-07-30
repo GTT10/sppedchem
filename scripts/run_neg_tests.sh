@@ -53,25 +53,32 @@ DRV_BIN="$TAG/driver_smoke"
 # Each case: "<mechanism dir>|<substring the rejection message must contain>"
 neg_cases=(
   "test/data_neg_ford/|modified species order (FORD/RORD)"
-  # PLOG + analytic-Jacobian solver: PLOG forward rates are evaluated
-  # (stage 2), but the analytic PLOG Jacobian is stage 3, so the default
-  # "...JAC" solver is refused. test/data_plog_prf/ is the PRF mechanism
-  # with one reaction PLOG-ified (identical nodes), so it sets up cleanly
-  # and reaches the integrate-time guard.
-  "test/data_plog_prf/|analytic Jacobian"
   # strict_chemkin: duplicate pressure within one PLOG reaction is
   # rejected by CKINTP (error stop) before a usable cklink is written.
   "test/data_neg_plog_dup/|not strictly ascending"
+  "test/data_neg_plog_a/|must be finite and positive"
+  "test/data_neg_plog_rev/|also uses REV/third-body/falloff syntax"
+  "test/data_neg_plog_thirdbody/|also uses REV/third-body/falloff syntax"
 )
 
 echo "[2/2] Running negative cases..."
 echo "----------------------------------------------------------------------"
 
 fails=0
+tmp_root=$(mktemp -d)
+trap 'rm -rf -- "$tmp_root"' EXIT
 for case in "${neg_cases[@]}"; do
   mech="${case%%|*}"
   want="${case#*|}"
-  mechdir="$root_dir/$mech"
+  source_dir="$root_dir/$mech"
+  mechdir="$source_dir"
+  if [[ ! -f "${source_dir}therm.dat" ]]; then
+    staged="$tmp_root/$(basename "${source_dir%/}")"
+    mkdir -p "$staged"
+    cp "${source_dir}chem.inp" "$staged/chem.inp"
+    cp "$root_dir/test/data_plog/therm.dat" "$staged/therm.dat"
+    mechdir="$staged/"
+  fi
 
   # Clean any stale generated files so CKINTP/SCcklink run fresh.
   rm -f "${mechdir}"cklink "${mechdir}"chem.bin "${mechdir}"SpeedCHEM.* \

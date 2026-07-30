@@ -1,4 +1,4 @@
-# PLOG-on-PRF test mechanism (stage 2)
+# PLOG-on-PRF regression mechanism
 
 The bundled 51-species PRF n-hexadecane/iso-cetane mechanism
 (`test/data/`) with **one reaction converted to PLOG form**:
@@ -27,15 +27,9 @@ the sparse chemistry cleanly (unlike a hand-built toy mechanism).
   That proves PLOG is wired into the real RHS and reproduces the
   Arrhenius rate it stands in for.
 
-- **Analytic-Jacobian guard** (`scripts/run_neg_tests.sh`): run with the
-  default solver (`LSODESJAC`, analytic Jacobian), `chemistry_ODE_integrate`
-  **refuses** it — PLOG forward rates are evaluated (stage 2) but the
-  analytic PLOG Jacobian is stage 3, so a `...JAC` solver would use an
-  inconsistent Jacobian. The rejection names the solver and points to a
-  numeric-Jacobian solver. To integrate it, set `SC_SOLVER` to a
-  numeric-Jacobian solver (note: the stiff numeric solvers in this build
-  are independently flaky even on plain PRF, so RHS equivalence — not an
-  ignition run — is the stage-2 integration proof).
+- **Analytic-Jacobian regression** (`scripts/run_plog_eval_tests.sh`):
+  the default `LSODESJAC` path is supported. A separate compact test
+  compares every analytic Jacobian column with central differences.
 
 Only `chem.inp` (+ `therm.dat`, copied from `test/data/`) is meaningful;
 generated outputs are git-ignored.

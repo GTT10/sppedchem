@@ -31,7 +31,7 @@ program driver_smoke
     character(len=256) :: mech
     integer            :: env_len, env_stat
     ! Optional solver override (SC_SOLVER): pick a numeric-Jacobian solver for
-    ! PLOG mechanisms (the analytic-Jac default is refused with PLOG until stage 3).
+    ! Optional solver override for targeted solver regression tests.
     character(len=15)  :: solver_override
     integer            :: sv_len, sv_stat
 
@@ -84,7 +84,7 @@ program driver_smoke
     write(*,'(a)') ' Interpreting mechanism and building sparse chemistry...'
     call chemistry_input
 
-    ! Optional: override the solver (e.g. a numeric-Jacobian solver for PLOG).
+    ! Optional: override the solver.
     call get_environment_variable('SC_SOLVER', solver_override, sv_len, sv_stat)
     if (sv_stat == 0 .and. sv_len > 0) then
         solver = trim(adjustl(solver_override))

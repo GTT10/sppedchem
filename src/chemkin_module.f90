@@ -6146,6 +6146,7 @@
 !     where all lines of a reaction are visible together.
 !     -------------------------------------------------------------
       subroutine plog_add_line(ireac, pressure_atm, aval, bval, eraw, kerr, lout)
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
       implicit none
       integer, intent(in) :: ireac, lout
       real (dp), intent(in) :: pressure_atm, aval, bval, eraw
@@ -6160,6 +6161,16 @@
          write(lout,'(A,I6,A,1PE12.4,A)')                              &
             ' ERROR...PLOG pressure for reaction ', ireac,             &
             ' is not positive (', pressure_atm, ' atm)'
+         kerr = .true.
+         error stop 1
+      endif
+      if (.not. ieee_is_finite(aval) .or. .not. (aval > 0.0_dp)) then
+         write(*   ,'(A,I6,A,1PE12.4)')                               &
+            ' ERROR...PLOG A factor for reaction ', ireac,            &
+            ' must be finite and positive; got ', aval
+         write(lout,'(A,I6,A,1PE12.4)')                               &
+            ' ERROR...PLOG A factor for reaction ', ireac,            &
+            ' must be finite and positive; got ', aval
          kerr = .true.
          error stop 1
       endif
@@ -6190,6 +6201,23 @@
          if (pcl_reac(i) == ireac) pcl_EoverR(i) = pcl_EoverR(i) * efac
       end do
       end subroutine plog_apply_efac
+
+!     -------------------------------------------------------------
+!     plog_apply_afac: apply the same global MOLECULES -> MOLES
+!     conversion used for the main Arrhenius A factor. PLOG replaces
+!     the main rate expression, so every pressure-node A must receive
+!     the identical reaction-order-dependent conversion.
+!     -------------------------------------------------------------
+      subroutine plog_apply_afac(ireac, afac)
+      implicit none
+      integer, intent(in) :: ireac
+      real (dp), intent(in) :: afac
+      integer :: i
+      if (plog_nlines <= 0) return
+      do i = 1, plog_nlines
+         if (pcl_reac(i) == ireac) pcl_A(i) = pcl_A(i) * afac
+      end do
+      end subroutine plog_apply_afac
 
 !     -------------------------------------------------------------
 !     plog_finalize: turn the flat line list into packed, per-reaction
@@ -8333,6 +8361,16 @@
 !        same EFAC as PAR(3,II). strict_chemkin pressure-ordering and
 !        duplicate checks run in plog_finalize (all nodes visible).
 !
+            IF (LTHB .OR. LFAL .OR. LTRO .OR. LSRI .OR. LREV) THEN
+               WRITE(*   ,'(A,I0,A)')                                  &
+                  ' ERROR...PLOG reaction ', II,                       &
+                  ' also uses REV/third-body/falloff syntax'
+               WRITE(LOUT,'(A,I0,A)')                                  &
+                  ' ERROR...PLOG reaction ', II,                       &
+                  ' also uses REV/third-body/falloff syntax'
+               KERR = .TRUE.
+               ERROR STOP 1
+            ENDIF
             CALL IPPARR (RSTR, 1, 4, PLOGV, NVAL, IER, LOUT)
             IF (IER .NE. 0 .OR. NVAL .NE. 4) THEN
                WRITE (LOUT,'(A,A)')                                     &
@@ -8688,7 +8726,7 @@
 !      J. Research National Bureal of Standards, 92, 95, 1987
 !      6.0221367(39) mol-1 )
 !
-      USE plog_collect, only: plog_apply_efac   ! PLOG E-unit conversion
+      USE plog_collect, only: plog_apply_efac, plog_apply_afac
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
       DOUBLE PRECISION RU_JOUL,        AVAG,                ONE
       PARAMETER (RU_JOUL = 8.3140D0, AVAG = 6.0221367D23, ONE=1.0D0)
@@ -8804,6 +8842,10 @@
                NSTOP = NSTOP + NU(N,II)
             ENDIF
    50    CONTINUE
+!        PLOG is valid only for an ordinary gas-phase reaction (the
+!        combination guard runs when cklink is loaded). Its A-factor
+!        conversion therefore uses the unmodified forward molecularity.
+         IF (NSTOR.GT.0) CALL plog_apply_afac(II, AVAG**(NSTOR-1))
 !
          IF (NFAL.GT.0 .AND. IFAL(NFAL).EQ.II) THEN
 !
@@ -9212,7 +9254,7 @@
          IF (AUNITS .EQ. ' ') THEN
             IF (UPCASE(LINE(N:), 4) .EQ. 'MOLE') THEN
                IF (N+4.LE.ILASCH(LINE) .AND. &
-                          UPCASE(LINE(N+4:),1).EQ.'!') THEN
+                          UPCASE(LINE(N+4:),1).EQ.'C') THEN
 !
                   AUNITS = 'MOLC'
                   IF (IUNITS .EQ. ' ') THEN

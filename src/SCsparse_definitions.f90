@@ -386,8 +386,10 @@
          fmt_ersize = "(' Error: non-2D matrix made sparse ',          &
                         ' in sparse_allocate_fun:' )"
 
-!     Halt on non-2D matrix
-      if (nrows<1.or.ncols<1) then
+!     A zero-row matrix is a valid representation for an optional
+!     chemistry feature that is absent from a mechanism.  It still has
+!     a well-defined column count and one CSR row-pointer sentinel.
+      if (nrows<0.or.ncols<1.or.nels<0) then
          write(*,fmt_ersize)
          write(*,*)'nrow=',nrows,'nels=',nels,'ncols=',ncols
          stop
@@ -931,8 +933,9 @@
       type(sparse), intent(in)      :: A
       type(sparse), intent(inout)   :: B
 
-!     Preliminary check
-      if (.not.(A%nr>0).or.(.not.(A%nc>0)).or.(.not.(A%n>0))) then
+!     Preliminary check.  A matrix with valid dimensions and no stored
+!     entries is still an initialized sparse matrix.
+      if (A%nr<0.or.A%nc<1.or.A%n<0) then
          call matrix_details(A,'input matrix, A')
          write(*,*)'sparse_equivalence'
          write(*,*)'Error in sparse_equivalence: A not init'
@@ -1755,9 +1758,9 @@
       endif
 
       if (A%nc /= B%nc) then
-         write(*,*)'Sparse sum: wrong number of columns'
+         write(*,*)'Sparse addition: wrong number of columns'
          write(*,*)'A=',A%nc,' B=',B%nc
-         stop
+         error stop 1
       endif
 
 !      noA = .false.!.not.allocated(A)
@@ -1902,17 +1905,13 @@
       type(sparse)                 :: C
 
 
-      if (a == 0.e0_dp) then
-         call deallocate(C)
-      else
-         ! Initialize matrix
-         call allocate(B%nr, B%nc, B%n, C)
-
-         ! Perform multiplication
-         C%IA = B%IA
-         C%JA (1:C%n) = B%JA(1:C%n)
-         C%A  (1:C%n) = B%A (1:C%n) * a
-      endif
+!     Preserve dimensions even when the numerical result is zero.
+!     Returning an uninitialized object loses its column count and makes
+!     a later sparse sum fail for absent optional chemistry terms.
+      call allocate(B%nr, B%nc, B%n, C)
+      C%IA = B%IA
+      C%JA (1:C%n) = B%JA(1:C%n)
+      C%A  (1:C%n) = B%A (1:C%n) * a
 
       end function double_dot_sparse
 
@@ -1961,9 +1960,9 @@
       endif
 
       if (A%nc /= B%nc) then
-         write(*,*)'Sparse sum: wrong number of columns'
+         write(*,*)'Sparse difference: wrong number of columns'
          write(*,*)'A=',A%nc,' B=',B%nc
-         stop
+         error stop 1
       endif
 
 !      noA = .false.!.not.allocated(A)
@@ -2304,7 +2303,7 @@
                   spmatrix%n  <= size(spmatrix%JA) .and. &
                   spmatrix%nr == size(spmatrix%IA) - 1 .and. &
                   spmatrix%nc >  0  .and. &
-                  spmatrix%nr >  0 ) &
+                  spmatrix%nr >= 0 ) &
              isallocated = .true.
 
 

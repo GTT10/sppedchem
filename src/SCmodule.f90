@@ -402,13 +402,13 @@ contains
    !   **   Last update: wednesday, 23/11/2011                **
    !   *********************************************************
 
-   subroutine sparse_chemistry_setup(inotrev,nnotrev,Ainf)
+   subroutine sparse_chemistry_setup(inotrev,nnotrev,forward_active)
 
       implicit none
 
       integer, dimension(:), intent(in) :: inotrev
       integer, intent(in) :: nnotrev
-      real (dp)       , dimension(:), intent(in) :: Ainf
+      logical, dimension(:), intent(in) :: forward_active
 
       integer :: i
 
@@ -435,7 +435,7 @@ contains
       ! reaction rate constant
       stoich_r_eff_sp = stoich_r_sp
       do i = 1, stoich_r_sp%nr
-         if (Ainf(i)==0.e0_dp)call remove_line(stoich_r_eff_sp,i)
+         if (.not. forward_active(i)) call remove_line(stoich_r_eff_sp,i)
       end do
 
       istoich_r_eff_sp = stoich_r_eff_sp
@@ -3734,21 +3734,6 @@ contains
 !        ** PLOG (cklink v2) test/inspection helpers                  **
 !        ***************************************************************
 
-!        plog_dump_only(): true when the environment variable
-!        SC_PLOG_DUMP is set (to anything non-empty). In that mode the
-!        PLOG data is parsed, stored and dumpable, but SCcklink does NOT
-!        fail-closed on PLOG presence -- letting a parse/round-trip test
-!        exercise the plumbing without integrating (stage 1). Normal
-!        runs leave it unset, so a PLOG mechanism is refused (no rate
-!        evaluator yet). Removed/repurposed in stage 2.
-   logical function plog_dump_only()
-      implicit none
-      character(len=8) :: val
-      integer :: ln, st
-      call get_environment_variable('SC_PLOG_DUMP', val, ln, st)
-      plog_dump_only = (st == 0 .and. ln > 0)
-   end function plog_dump_only
-
 !        plog_dump_canonical(unit): write the loaded PLOG packed arrays
 !        as canonical text to `unit` (a stable, diff-able format for the
 !        round-trip test: parse -> write cklink -> read -> dump). One
@@ -3777,9 +3762,14 @@ contains
 !        ***************************************************************
 !        plog_kinf_eval: overwrite kinf(r) for every PLOG reaction r
 !        with the pressure-interpolated forward rate constant at the
-!        current temperature T = Ta(1) and pressure P_pa [Pa]. Called
-!        from mass_action right after the Arrhenius kinf is formed, so
-!        PLOG reactions replace their (placeholder) Arrhenius value.
+!        current temperature T = Ta(1) and pressure P_pa [Pa]. Optional
+!        outputs provide the exact constant-volume derivatives needed by
+!        the analytic Jacobian:
+!          dkinfdT(r)      = dk/dT at fixed rho,Y
+!          dlnk_dlnP(r)    = dln(k)/dln(P)
+!        Arrays are indexed by the global reaction number. Only PLOG
+!        entries are overwritten; callers retain legacy derivatives for
+!        every other rate form.
 !
 !        Per-node rate:  k_i(T) = A_i * T**b_i * exp(-(E/R)_i / T)
 !                                = A_i * exp(b_i*ln T - (E/R)_i / T)
@@ -3796,14 +3786,17 @@ contains
 !        A single-node PLOG reaction is just k_1 at all pressures.
 !        This routine only reads the packed arrays, so it is safe to
 !        call with n_plog_reactions == 0 (does nothing).
-   subroutine plog_kinf_eval(Ta, P_pa, kinf)
+   subroutine plog_kinf_eval(Ta, P_pa, kinf, dkinfdT, dlnk_dlnP)
       use working_precision, only: dp
       implicit none
       real (dp), dimension(6), intent(in)    :: Ta   ! [T, T2, T3, T4, 1/T, lnT]
       real (dp),               intent(in)    :: P_pa ! current pressure [Pa]
       real (dp), dimension(:), intent(inout) :: kinf ! rate constants (nr)
+      real (dp), dimension(:), intent(inout), optional :: dkinfdT
+      real (dp), dimension(:), intent(inout), optional :: dlnk_dlnP
       integer :: r, ir, j0, j1, nlo, nhi, node
-      real (dp) :: lnP, lnT, uT, theta, lnk, lnk0, lnk1
+      real (dp) :: lnP, lnT, uT, theta, lnk, lnk0, lnk1,            &
+                   g, g0, g1, slope
 
       if (n_plog_reactions <= 0) return
 
@@ -3823,17 +3816,23 @@ contains
          nlo = plog_node_ptr(r-1) + 1   ! first node of reaction r
          nhi = plog_node_ptr(r)         ! last  node of reaction r
 
+         slope = 0.0_dp
          if (nhi <= nlo) then
 !           Single pressure node: pressure-independent Arrhenius at k_1.
-            kinf(ir) = plog_node_rate(nlo, lnT, uT)
+            lnk = plog_node_lnk(nlo, lnT, uT)
+            g   = plog_node_dlnkdT(nlo, uT)
 
-         else if (lnP <= plog_logP(nlo)) then
-!           At or below the lowest node -> nearest endpoint (s = 0).
-            kinf(ir) = plog_node_rate(nlo, lnT, uT)
+         else if (lnP < plog_logP(nlo)) then
+!           Below the lowest node -> nearest endpoint (s = 0). Equality
+!           uses the first interval, matching the right-continuous
+!           convention used at every interior node.
+            lnk = plog_node_lnk(nlo, lnT, uT)
+            g   = plog_node_dlnkdT(nlo, uT)
 
          else if (lnP >= plog_logP(nhi)) then
 !           At or above the highest node -> nearest endpoint (s = 0).
-            kinf(ir) = plog_node_rate(nhi, lnT, uT)
+            lnk = plog_node_lnk(nhi, lnT, uT)
+            g   = plog_node_dlnkdT(nhi, uT)
 
          else
 !           Locate the bracketing interval [j0, j1] with
@@ -3848,26 +3847,53 @@ contains
             end do
             j1 = j0 + 1
 
-            lnk0  = log(plog_node_rate(j0, lnT, uT))
-            lnk1  = log(plog_node_rate(j1, lnT, uT))
+            lnk0  = plog_node_lnk(j0, lnT, uT)
+            lnk1  = plog_node_lnk(j1, lnT, uT)
+            g0    = plog_node_dlnkdT(j0, uT)
+            g1    = plog_node_dlnkdT(j1, uT)
             theta = (lnP - plog_logP(j0)) /                            &
                     (plog_logP(j1) - plog_logP(j0))
             lnk   = (1.0_dp - theta)*lnk0 + theta*lnk1
-            kinf(ir) = exp(lnk)
+            slope = (lnk1 - lnk0) /                                    &
+                    (plog_logP(j1) - plog_logP(j0))
+!           At fixed P, theta is constant. At fixed rho,Y, however,
+!           dlnP/dT=1/T, hence the additional slope/T chain-rule term.
+            g = (1.0_dp - theta)*g0 + theta*g1 + slope*uT
          endif
+
+         kinf(ir) = exp(lnk)
+         if (present(dkinfdT))   dkinfdT(ir)   = kinf(ir)*g
+         if (present(dlnk_dlnP)) dlnk_dlnP(ir) = slope
       end do
    end subroutine plog_kinf_eval
 
-!        plog_node_rate: Arrhenius rate constant of a single PLOG node.
-!        k = A * exp(b*lnT - (E/R)/T). Separated out so interpolation
-!        and (stage-3) derivatives share exactly one node-rate formula.
+!        Logarithmic node rate avoids underflow before interpolation.
+   real (dp) function plog_node_lnk(node, lnT, uT)
+      use working_precision, only: dp
+      implicit none
+      integer,   intent(in) :: node
+      real (dp), intent(in) :: lnT, uT
+      plog_node_lnk = log(plog_A(node)) + plog_b(node)*lnT -          &
+                      plog_EoverR(node)*uT
+   end function plog_node_lnk
+
+!        Temperature derivative of ln(k_node) at fixed pressure:
+!        b/T + (E/R)/T**2.
+   real (dp) function plog_node_dlnkdT(node, uT)
+      use working_precision, only: dp
+      implicit none
+      integer,   intent(in) :: node
+      real (dp), intent(in) :: uT
+      plog_node_dlnkdT = plog_b(node)*uT + plog_EoverR(node)*uT*uT
+   end function plog_node_dlnkdT
+
+!        Retained as a public convenience for tests/inspection.
    real (dp) function plog_node_rate(node, lnT, uT)
       use working_precision, only: dp
       implicit none
       integer,   intent(in) :: node
       real (dp), intent(in) :: lnT, uT
-      plog_node_rate = plog_A(node) *                                  &
-                       exp(plog_b(node)*lnT - plog_EoverR(node)*uT)
+      plog_node_rate = exp(plog_node_lnk(node, lnT, uT))
    end function plog_node_rate
 
 !        ***************************************************************
@@ -3885,6 +3911,7 @@ contains
       &third_body_sp
       use sparse_algebra, only:sparse, dense_to_sparse, sparse_value,&
       &sparse_row_prod, sparse_internal_count
+      use sparse_definitions, only: allocate
 
       implicit none
 
@@ -3894,36 +3921,32 @@ contains
       integer, dimension(nTHREE) :: count_tb
 
 
-!        Count number of species involved in three body reactions
-      call sparse_internal_count(tb_beta_sp, count_tb, dim=2)
+!        Count/pack species involved in third-body reactions. A
+!        zero-third-body mechanism is valid (and common for focused
+!        PLOG tests), so avoid MAXVAL and sparse assignment on empties.
+      if (nTHREE > 0) then
+         call sparse_internal_count(tb_beta_sp, count_tb, dim=2)
+         nmax = maxval(count_tb)
+         allocate(n_tb_beta(nTHREE), tb_beta_pack(nmax,nTHREE),       &
+                  is_beta_pack(nmax,nTHREE))
 
-!        Allocate number of species with beta /= 0 in each tb reaction
-      nmax = maxval(count_tb)
-      allocate(n_tb_beta   (nTHREE),&
-      &tb_beta_pack(nmax, nTHREE), is_beta_pack(nmax,nTHREE))
-
-
-
-      do i = 1, nTHREE
-
-         ir = iTHREE(i)
-
-         n_tb_beta(i) = count_tb(i)
-
-         if (n_tb_beta(i) > 0) then
-
-            tb_beta_pack(1:n_tb_beta(i),i) =&
-            &tb_beta_sp% A(tb_beta_sp%IA(i):tb_beta_sp%IA(i+1)-1)
-
-            is_beta_pack(1:n_tb_beta(i),i) =&
-            &tb_beta_sp%JA(tb_beta_sp%IA(i):tb_beta_sp%IA(i+1)-1)
-
-         endif
-
-      end do
+         do i = 1, nTHREE
+            ir = iTHREE(i)
+            n_tb_beta(i) = count_tb(i)
+            if (n_tb_beta(i) > 0) then
+               tb_beta_pack(1:n_tb_beta(i),i) =                       &
+                  tb_beta_sp%A(tb_beta_sp%IA(i):tb_beta_sp%IA(i+1)-1)
+               is_beta_pack(1:n_tb_beta(i),i) =                       &
+                  tb_beta_sp%JA(tb_beta_sp%IA(i):tb_beta_sp%IA(i+1)-1)
+            endif
+         enddo
 
 !        Initialise third body coefficients divided by molecular weights
-      tbb_uMW_sp =  sparse_row_prod(tb_beta_sp, uMW)
+         tbb_uMW_sp = sparse_row_prod(tb_beta_sp, uMW)
+      else
+         allocate(n_tb_beta(0), tb_beta_pack(0,0), is_beta_pack(0,0))
+         call allocate(0, ns, 0, tbb_uMW_sp)
+      endif
 
 
 

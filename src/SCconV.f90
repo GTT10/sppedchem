@@ -417,9 +417,12 @@
                                mass_action_productories
       use reacpar,      only : Troereac, nEQREV, iEQREV, nXREV, iXREV,    &
                                uequilC_and_derivative, nTREV, iTREV,      &
-                               is_beta_pack, tb_beta_pack, n_tb_beta
+                               is_beta_pack, tb_beta_pack, n_tb_beta,      &
+                               n_plog_reactions, plog_reaction,           &
+                               plog_kinf_eval
       use SCspeciesthermo, only : CvuRmol, int_energy, dCv_dT
-      use SCmixturethermo, only : SCP,SCrho,cp,cv, cvmas, molar_volumes
+      use SCmixturethermo, only : SCP,SCrho,cp,cv, cvmas, molar_volumes,  &
+                                  pressurerhoT
       use sparse_chemistry, only: sparse, nudiffT_sparse,                 &
                                   dq_dY_sparse, sparse_allocate,          &
                                   sparse_to_dense,JACYY_sparse,           &
@@ -530,6 +533,7 @@
 !     PART 1 - DERIVATIVES WITH RESPECT TO TEMPERATURE ****************
       real (dp)                              :: dT_dT
       real (dp)       , dimension(nr)        :: dkinfdT, dkbdT
+      real (dp)       , dimension(nr)        :: plog_dlnk_dlnP
       real (dp)       , dimension(ntbFALL)   :: dk0dTs, k0s
       real (dp)       , dimension(ntbFALL)   :: dk0dT, k0, k0M
       real (dp)       , dimension(nr)        :: dq_dT
@@ -550,6 +554,7 @@
 !     Factor for Three-body reactions
       real (dp)       , dimension(:,:), allocatable :: dMeff_dY
       real (dp)                                     :: C_pow_nu
+      real (dp)                                     :: plog_dq
       real (dp)       , dimension(neq-1)            :: dlogP_dY
       real (dp)       , dimension(neq-1), target    :: YY
 
@@ -593,12 +598,19 @@
       where ( abs(Y) < small ) Y = sign(small,Y)
       uY = one/Y
 
-!     Error check on temperature (.not.T>0.e0_dp) means T is negative
-!     or NaN; the same for pressure. On an invalid state, set the sparse
+!     Error check on temperature/density. The Jacobian must recompute
+!     pressure from its own input state; relying on SCP from the preceding
+!     RHS call is wrong for finite differences and solver callback orders.
+!     On an invalid state, set the sparse
 !     Jacobian to a safe placeholder (as the empty/wrong-item guard above
 !     does) rather than returning with JAC_sparse left at its stale value
 !     from a previous call.
-      if (.not. T > zero .or. .not. SCP > zero) then
+      if (.not. T > zero .or. .not. SCrho > zero) then
+         if (allocated(JAC_sparse%A)) JAC_sparse%A = small
+         return
+      endif
+      SCP = pressurerhoT(T,Y)
+      if (.not. SCP > zero) then
          if (allocated(JAC_sparse%A)) JAC_sparse%A = small
          return
       endif
@@ -646,6 +658,13 @@
          call reaction_rates_and_derivative(Ta, k0, dk0dT, kinf, dkinfdT, iT, frac)
 
       endif
+
+!     Replace the placeholder Arrhenius rate and derivative for every
+!     PLOG reaction. dkinfdT includes both the interpolated node
+!     temperature derivative and dlnk/dlnP * dlnP/dT at fixed rho,Y.
+      plog_dlnk_dlnP = zero
+      if (n_plog_reactions > 0)                                        &
+         call plog_kinf_eval(Ta, SCP, kinf, dkinfdT, plog_dlnk_dlnP)
 
 !     Specific heat [J/mol/K]
       Cvmol = Cvmol * R
@@ -912,8 +931,34 @@
 
       call sparse_row_prod_valonly(dq_dY_sparse, uY)
 
-      tmp_sp = sparse_partial_sum(dq_dY_sparse,dFTL_dY_sp,itbALL)
-      dq_dY_sparse = tmp_sp
+!     PLOG composition coupling. At fixed rho,T for an ideal gas,
+!       dlnP/dY_j = (1/W_j) / sum_i(Y_i/W_i).
+!     The rate contribution to dq/dY is q*dlnk/dlnP*dlnP/dY. This is
+!     structurally dense across all species for every PLOG reaction,
+!     including equilibrium-reversible reactions because forward and
+!     reverse rates share the same PLOG multiplier.
+      if (n_plog_reactions > 0) then
+         dlogP_dY = uMW / sum(Y*uMW)
+         ire = 1
+         do i = 1, nr
+            if (ire <= n_plog_reactions .and. plog_reaction(ire) == i) then
+               do j = 1, ns
+                  plog_dq = q(i)*plog_dlnk_dlnP(i)*dlogP_dY(j)
+!                 Preserve the state-independent symbolic pattern even
+!                 at a clamped pressure or instantaneous q=0 state.
+                  if (abs(plog_dq) < small) plog_dq = sign(small,plog_dq)
+                  call add_value(dq_dY_sparse,i,j,                    &
+                     sparse_value(dq_dY_sparse,i,j) + plog_dq)
+               enddo
+               ire = ire + 1
+            endif
+         enddo
+      endif
+
+      if (ntbALL > 0) then
+         tmp_sp = sparse_partial_sum(dq_dY_sparse,dFTL_dY_sp,itbALL)
+         dq_dY_sparse = tmp_sp
+      endif
 
 !     RETRIEVING SPARSE FORMULATION FOR JACYY_SPARSE MATRIX
       if (.not.sparse_jac) call sparse_symbolic_mm(nudiffT_molarv_sparse, dq_dY_sparse, JACYY_sparse)
@@ -1694,12 +1739,6 @@
 
 
       end subroutine conV_integrate
-
-
-
-
-
-
 
 
 

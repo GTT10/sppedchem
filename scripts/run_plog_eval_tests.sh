@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# SpeedCHEM PLOG rate-evaluation test harness (Intel ifx only) -- stage 2.
+# SpeedCHEM PLOG rate/Jacobian test harness (Intel ifx only).
 #
 # Two checks, both independent of the (separately-flaky) stiff ODE solvers:
 #
@@ -42,22 +42,25 @@ echo "======================================================================"
 echo " SpeedCHEM PLOG rate-evaluation test harness (ifx)"
 echo "======================================================================"
 
-echo "[1/3] Building library and PLOG test drivers..."
+echo "[1/6] Building library and PLOG test drivers..."
 make FC="$FC" -j1 >/dev/null
 LIB="$TAG/libSpeedCHEM64.a"
 [[ -f "$LIB" ]] || { echo "run_plog_eval_tests.sh: library not produced ($LIB)" >&2; exit 1; }
 
 build_drv() {  # $1 = source basename (without .f90)
   "$FC" "${DRV_FLAGS[@]}" -c "test/$1.f90" -o "$TAG/build/$1.o"
-  "$FC" "$TAG/build/$1.o" "$LIB" -o "$TAG/$1"
+  "$FC" "$TAG/build/$1.o" -Wl,--start-group "$LIB" -Wl,--end-group -o "$TAG/$1"
 }
 build_drv driver_plog_eval
 build_drv driver_rhs_probe
+build_drv driver_plog_jacobian
+build_drv driver_plog_mpi
+build_drv driver_plog_integrate
 
 fails=0
 
 # ---- 1. Unit test -----------------------------------------------------------
-echo "[2/3] PLOG rate unit test (plog_kinf_eval vs closed form)..."
+echo "[2/6] PLOG rate and derivative unit test..."
 echo "----------------------------------------------------------------------"
 set +e
 "$TAG/driver_plog_eval"
@@ -69,7 +72,7 @@ if [[ $rc -ne 0 ]]; then
 fi
 
 # ---- 2. RHS equivalence -----------------------------------------------------
-echo "[3/3] RHS equivalence: plain PRF vs PLOG-PRF (identical nodes)..."
+echo "[3/6] RHS equivalence: plain PRF vs PLOG-PRF (identical nodes)..."
 echo "----------------------------------------------------------------------"
 prf_dir="$root_dir/test/data/"
 plog_dir="$root_dir/test/data_plog_prf/"
@@ -97,9 +100,43 @@ else
   fails=$((fails+1))
 fi
 
+# ---- 3. Complete analytic Jacobian -----------------------------------------
+echo "[4/6] PLOG analytic Jacobian vs central differences..."
+echo "----------------------------------------------------------------------"
+set +e
+"$TAG/driver_plog_jacobian"
+rc=$?
+set -e
+if [[ $rc -ne 0 ]]; then
+  echo "    analytic Jacobian test FAILED (exit $rc)"
+  fails=$((fails+1))
+fi
+
+echo "[5/6] PLOG integration with default LSODESJAC..."
+echo "----------------------------------------------------------------------"
+set +e
+"$TAG/driver_plog_integrate"
+rc=$?
+set -e
+if [[ $rc -ne 0 ]]; then
+  echo "    PLOG integration test FAILED (exit $rc)"
+  fails=$((fails+1))
+fi
+
+echo "[6/6] PLOG MPI broadcast..."
+echo "----------------------------------------------------------------------"
+set +e
+mpiexec -n 2 "$TAG/driver_plog_mpi"
+rc=$?
+set -e
+if [[ $rc -ne 0 ]]; then
+  echo "    MPI broadcast test FAILED (exit $rc)"
+  fails=$((fails+1))
+fi
+
 echo "======================================================================"
 if [[ $fails -eq 0 ]]; then
-  echo " RESULT: PASS — PLOG rates evaluate correctly and feed the RHS"
+  echo " RESULT: PASS — PLOG rates, RHS, and analytic Jacobian are correct"
   echo "======================================================================"
   exit 0
 else

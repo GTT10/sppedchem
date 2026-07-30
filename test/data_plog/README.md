@@ -1,8 +1,8 @@
-# PLOG plumbing test mechanism (cklink v2, stage 1)
+# PLOG end-to-end test mechanism (cklink v2)
 
 A minimal, **illustrative** (not physically calibrated) mechanism that
-contains one `PLOG` (pressure-dependent Arrhenius) reaction, used to test
-the stage-1 PLOG data-plumbing path:
+contains one `PLOG` (pressure-dependent Arrhenius) reaction, used for
+binary plumbing, rate, analytic Jacobian, integration, and MPI tests:
 
 ```
 chem.inp + therm.dat --[CKINTP]--> cklink(v2) --[SCcklink]--> reacpar PLOG arrays
@@ -39,12 +39,10 @@ Generated outputs (`cklink`, `chem.bin`, `SpeedCHEM.*`, `dat.*`,
 
 ## How it is driven
 
-- `scripts/run_plog_tests.sh` (positive): builds `test/driver_plog.f90`,
-  runs it with `SC_PLOG_DUMP=1` (which makes `SCcklink` skip its PLOG
-  fail-closed guard), and asserts the dump equals `plog_expected.txt`.
-- `scripts/run_neg_tests.sh` (negative): runs the **integrating**
-  `driver_smoke` on this same mechanism *without* `SC_PLOG_DUMP`, and
-  asserts it is refused (exit non-zero, message contains `PLOG`). Stage 1
-  parses and stores PLOG but does not evaluate PLOG rates, so integrating
-  must fail closed rather than silently ignore the pressure dependence.
-  That guard is lifted in stage 2 when PLOG rates are implemented.
+- `scripts/run_plog_tests.sh`: builds `test/driver_plog.f90` and asserts
+  the canonical dump equals `plog_expected.txt`.
+- `scripts/run_plog_eval_tests.sh`: checks rate values and derivatives,
+  full analytic Jacobian columns, default-`LSODESJAC` integration, and
+  two-rank MPI broadcast.
+- `scripts/run_neg_tests.sh`: rejects malformed PLOG input and unsupported
+  PLOG combinations (`REV`, third-body/falloff, duplicate pressure).

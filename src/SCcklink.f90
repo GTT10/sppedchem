@@ -48,6 +48,7 @@
 !     *****************************************************************
 
       subroutine SCcklink
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 
       use working_precision
 !ck2015      use chemistry_setup, only: mechanism
@@ -169,7 +170,7 @@
       character(len=8), parameter :: CK_MAGIC_EXPECT  = 'SCLKv2  '
       integer,          parameter :: CK_SCHEMA_EXPECT = 2
 !     PLOG section scratch + checksum
-      integer :: plog_chk_in, plog_chk_calc, ipl
+      integer :: plog_chk_in, plog_chk_calc, ipl, inode
 
       logical,          dimension(:)  , allocatable :: reac_cond
 
@@ -191,6 +192,7 @@
                                                        tmpE
       real (8)        , dimension(:,:), allocatable :: tmptemp, tmprea
       real (8)        , dimension(:,:), allocatable :: tmpfar, tmpmol
+      real (dp)       , dimension(:,:), allocatable :: third_body_dense
 
       type(sparseint)                               :: tmp_isp
 
@@ -949,6 +951,16 @@
                       "' (counts record). Aborting.')")
           error stop 1
        endif
+       if (n_plog_reactions < 0 .or. n_plog_nodes < 0 .or.             &
+           (n_plog_reactions == 0 .and. n_plog_nodes /= 0) .or.        &
+           (n_plog_reactions > 0 .and.                                &
+            n_plog_nodes < n_plog_reactions)) then
+          write(*   , "(' ERROR: invalid cklink v2 PLOG counts: ',"//  &
+                      "'reactions=',I0,', nodes=',I0,'. Aborting.')")   &
+                      n_plog_reactions, n_plog_nodes
+          write(lout, "(' ERROR: invalid cklink v2 PLOG counts.')")
+          error stop 1
+       endif
        n_plog_terms = n_plog_nodes   ! strict_chemkin: one term per node
 
 !      Defensive: make SCcklink re-entrant (a second call in the same
@@ -989,6 +1001,44 @@
                          "' Aborting.')")
              error stop 1
           endif
+
+!         Validate the complete packed topology before any array is used.
+!         This turns corrupt-but-readable cklink records into a controlled
+!         failure instead of an out-of-bounds access in the evaluator.
+          if (plog_node_ptr(0) /= 0 .or.                               &
+              plog_node_ptr(n_plog_reactions) /= n_plog_nodes) then
+             write(*   , "(' ERROR: invalid cklink v2 PLOG node',"//  &
+                         "' pointers. Regenerate cklink. Aborting.')")
+             write(lout, "(' ERROR: invalid cklink v2 PLOG node pointers.')")
+             error stop 1
+          endif
+          do ipl = 1, n_plog_reactions
+             if (plog_reaction(ipl) < 1 .or. plog_reaction(ipl) > nr .or. &
+                 (ipl > 1 .and.                                         &
+                  plog_reaction(ipl) <= plog_reaction(ipl-1)) .or.       &
+                 plog_node_ptr(ipl) <= plog_node_ptr(ipl-1)) then
+                write(*   , "(' ERROR: invalid cklink v2 PLOG reaction',"//&
+                            "' map/pointers at packed reaction ',I0,"//   &
+                            "'. Aborting.')") ipl
+                write(lout, "(' ERROR: invalid cklink v2 PLOG reaction map.')")
+                error stop 1
+             endif
+             do inode = plog_node_ptr(ipl-1)+1, plog_node_ptr(ipl)
+                if (.not. ieee_is_finite(plog_logP(inode)) .or.         &
+                    .not. ieee_is_finite(plog_A(inode)) .or.            &
+                    .not. ieee_is_finite(plog_b(inode)) .or.            &
+                    .not. ieee_is_finite(plog_EoverR(inode)) .or.       &
+                    .not. plog_A(inode) > zero .or.                     &
+                    (inode > plog_node_ptr(ipl-1)+1 .and.                &
+                     plog_logP(inode) <= plog_logP(inode-1))) then
+                   write(*   , "(' ERROR: invalid cklink v2 PLOG node ',"//&
+                               "I0,' for reaction ',I0,'. Aborting.')")  &
+                               inode, plog_reaction(ipl)
+                   write(lout, "(' ERROR: invalid cklink v2 PLOG node.')")
+                   error stop 1
+                endif
+             enddo
+          enddo
        else
 !         No PLOG reactions: leave arrays unallocated (size 0 conceptually).
           allocate(plog_reaction(0), plog_node_ptr(0:0))
@@ -1016,6 +1066,49 @@
           error stop 1
        endif
 
+!      Standard gas-phase PLOG cannot be combined with an explicit REV
+!      rate, falloff syntax, TROE, or another pressure form.
+!      These combinations require different mathematics and must never
+!      fall through to the ordinary PLOG evaluator.
+       do ipl = 1, n_plog_reactions
+          k = plog_reaction(ipl)
+          if (REV(k) .or. HIGH(k) .or. LOW(k) .or. TROE(k)) then
+             write(*   , "(' ERROR: PLOG reaction ',I0,' has',"//      &
+                         "' unsupported REV/HIGH/LOW/TROE flags: ',"// &
+                         "4(L1,1X))")                                   &
+                         k, REV(k), HIGH(k), LOW(k), TROE(k)
+             write(lout, "(' ERROR: unsupported PLOG combination at',"//&
+                          "' reaction ',I0,'.')") k
+             error stop 1
+          endif
+       enddo
+
+!      CKINTP's legacy linking layout classifies PLOG reactions in the
+!      third-body table even when the CHEMKIN equation contains no +M.
+!      PLOG already includes pressure dependence in k(T,P); retaining
+!      those rows would multiply the rate by [M] a second time. Rebuild
+!      the matrix without PLOG rows. Explicit +M/falloff was rejected
+!      while parsing, so every removed row is the legacy PLOG marker.
+       if (n_plog_reactions > 0) then
+          allocate(third_body_dense(nr,ns))
+          third_body_dense = zero
+          do i = 1, nr
+             if (any(plog_reaction == i)) cycle
+             do j = 1, ns
+                third_body_dense(i,j) = sparse_value(third_body_sp,i,j)
+             enddo
+          enddo
+          call deallocate(third_body_sp)
+          call allocate(nr, ns, 0, third_body_sp)
+          do i = 1, nr
+             do j = 1, ns
+                if (third_body_dense(i,j) /= zero)                     &
+                   call add_value(third_body_sp,i,j,third_body_dense(i,j))
+             enddo
+          enddo
+          deallocate(third_body_dense)
+       endif
+
 !      Build the per-reaction rate-form tag. Legacy code paths still use
 !      Arrhreac/Lindreac/Troereac; rate_form is stage-1 plumbing that
 !      records which reactions are PLOG (RATE_PLOG). It is populated for
@@ -1028,15 +1121,11 @@
        end do
 
        if (n_plog_reactions > 0) then
-!         Stage 2: PLOG forward rates ARE now evaluated (see
-!         reacpar::plog_kinf_eval, called from mass_action). PLOG is
-!         supported with numeric-Jacobian solvers; the analytic-Jacobian
-!         path does not yet include the pressure derivative (stage 3), so
-!         chemistry_ODE_integrate refuses ...JAC solvers when PLOG is
-!         present. No blanket fail-closed here anymore.
+!         PLOG forward rates and exact constant-volume analytic
+!         derivatives are evaluated by reacpar::plog_kinf_eval.
           write(lout, "(' PLOG: ',I0,' pressure-dependent reaction(s),',"//&
                       "' ',I0,' pressure node(s) loaded and evaluable',"//  &
-                      "' (cklink v2, numeric-Jacobian solvers).')")         &
+                      "' (cklink v2, analytic Jacobian enabled).')")        &
                       n_plog_reactions, n_plog_nodes
        endif
 

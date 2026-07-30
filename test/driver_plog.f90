@@ -1,17 +1,15 @@
 !   ***********************************************************************************************
-!   **  SpeedCHEM PLOG parse-only driver  (cklink v2, stage 1)                                    **
+!   **  SpeedCHEM PLOG parse-only driver  (cklink v2)                                             **
 !   **                                                                                           **
 !   **  Exercises the PLOG data-plumbing path WITHOUT integrating:                               **
 !   **                                                                                           **
 !   **     chem.inp + therm.dat --[CKINTP]--> cklink(v2) --[SCcklink]--> reacpar PLOG arrays      **
 !   **                          --[plog_dump_canonical]--> stable text on stdout                 **
 !   **                                                                                           **
-!   **  It stops right after linking (never builds the ODE workspace or integrates), so a PLOG   **
-!   **  mechanism can be parsed and round-tripped even though PLOG rate evaluation is not yet     **
-!   **  implemented (stage 2). SCcklink only skips its PLOG fail-closed guard when SC_PLOG_DUMP   **
-!   **  is set in the environment; this driver sets it defensively too.                          **
+!   **  It stops right after linking (never builds the ODE workspace or integrates), isolating    **
+!   **  the binary round-trip from the rate/Jacobian tests.                                       **
 !   **                                                                                           **
-!   **  Usage:  SC_MECHDIR=test/data_plog/ SC_PLOG_DUMP=1 driver_plog                            **
+!   **  Usage:  SC_MECHDIR=test/data_plog/ driver_plog                                           **
 !   **  Output: the canonical PLOG dump (see reacpar::plog_dump_canonical); exit 0 on success.   **
 !   ***********************************************************************************************
 
@@ -44,8 +42,7 @@ program driver_plog
     ! ------------------------------------------------------------------
     ! 2. Interpret + link only (no ODE setup, no integration).
     !    CKINTP writes cklink v2 (with the PLOG section); SCcklink reads
-    !    it back into the reacpar packed arrays. With SC_PLOG_DUMP set,
-    !    SCcklink does not fail-closed on PLOG presence.
+    !    it back into the reacpar packed arrays.
     ! ------------------------------------------------------------------
     call ckintp
     call SCcklink
