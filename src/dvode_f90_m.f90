@@ -1946,7 +1946,7 @@
 ! ..
 ! .. Derived Type Declarations ..
       TYPE, PUBLIC :: VODE_OPTS
-        REAL (WP), DIMENSION (:), POINTER :: ATOL, RTOL
+        REAL (WP), DIMENSION (:), POINTER :: ATOL => NULL(), RTOL => NULL()
         INTEGER :: MF, METH, MITER, MOSS, ITOL, IOPT, NG
         LOGICAL :: DENSE, BANDED, SPARSE
       END TYPE VODE_OPTS
