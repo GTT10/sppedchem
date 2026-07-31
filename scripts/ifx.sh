@@ -31,6 +31,7 @@ FCFLAGS=(
 
 SRCS=(
   "$SRCDIR/working_precision.f90"
+  "$SRCDIR/SCstring_limits.f90"
   "$SRCDIR/SCutilities.f90"
   "$SRCDIR/SCsparse_definitions.f90"
   "$SRCDIR/SCsparse.f90"

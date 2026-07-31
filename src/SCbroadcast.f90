@@ -52,6 +52,7 @@
 subroutine SCbroadcast
 
    use sparse_mpi
+   use chemistry_string_limits, only: species_name_len
    use chemistry_setup
    use speedchem
    use sparse_chemistry
@@ -157,7 +158,7 @@ subroutine SCbroadcast
    call mpi_broadcast(nTHREE)
    call mpi_broadcast(nTB)
 
-   call mpi_broadcast(18,specie)
+   call mpi_broadcast(species_name_len,specie)
    call mpi_broadcast(2 ,elementi)
 
    call mpi_broadcast(sparse_jac)
@@ -405,4 +406,3 @@ subroutine SCbroadcast
 
 !     *****************************************************************
 end subroutine SCbroadcast
-

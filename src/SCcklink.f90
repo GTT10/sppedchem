@@ -51,6 +51,7 @@
       use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 
       use working_precision
+      use chemistry_string_limits, only: species_name_len
 !ck2015      use chemistry_setup, only: mechanism
       use chemistry_setup, only: mechanism, mechdir
       use speedchem,   only: nel, ns, nr, neq, uneq, species,         &
@@ -151,7 +152,7 @@
 !     At len=80 long mechdir paths were silently truncated. Match them.
       character(len=255)                           :: ckfile
       character(len=16)                            :: ckvers, ckprec
-      character(len=16), dimension(:), allocatable :: tmpchar
+      character(len=species_name_len), dimension(:), allocatable :: tmpchar
 
       logical :: ispresent, ispresent2, kerr, invalid_plog
       integer :: i, j, k, idummy1, idummy2
@@ -168,7 +169,7 @@
       character(len=8) :: ck_magic_in
       integer          :: ck_schema_in
       character(len=8), parameter :: CK_MAGIC_EXPECT  = 'SCLKv2  '
-      integer,          parameter :: CK_SCHEMA_EXPECT = 2
+      integer,          parameter :: CK_SCHEMA_EXPECT = 3
 !     PLOG section scratch + checksum
       integer :: plog_chk_in, plog_chk_calc, ipl, inode
 
