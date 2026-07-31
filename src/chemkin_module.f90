@@ -13,6 +13,7 @@
 
       module chemkinII
 
+      use chemistry_string_limits, only: species_name_len
 
       implicit none
       public
@@ -2219,7 +2220,7 @@
 !                   Data type - real array
 !                   Dimension RCKWRK(*) at least LENRWK.
 !     CCKWRK - Array of character work space.
-!                   Data type - CHARACTER*16 array
+!                   Data type - CHARACTER*18 array
 !                   Dimension CCKWRK(*) at least LENCWK.
       IMPLICIT DOUBLE PRECISION (A-H, O-Z), INTEGER (I-N)
 
@@ -2257,7 +2258,7 @@
                            MAXSP, MAXTB, MAXTP, NTHCF, NIPAR, NITAR,  &
                            NIFAR, NRV, NFL, NTB, NLT, NRL, NW, NCHRG
 
-      IF (LEN(CCKWRK(1)) .LT. 16) THEN
+      IF (LEN(CCKWRK(1)) .LT. species_name_len) THEN
          WRITE (LOUT,475)
          stop
       ENDIF
@@ -2472,7 +2473,7 @@
   300 FORMAT (10X,'ICKWRK MUST BE DIMENSIONED AT LEAST ',I5)
   350 FORMAT (10X,'RCKWRK MUST BE DIMENSIONED AT LEAST ',I5)
   375 FORMAT (10X,'CCKWRK MUST BE DIMENSIONED AT LEAST ',I5)
-  475 FORMAT (10X,'CHARACTER LENGTH OF CCKWRK MUST BE AT LEAST 16 ')
+  475 FORMAT (10X,'CHARACTER LENGTH OF CCKWRK MUST BE AT LEAST 18 ')
       END SUBROUTINE CKINIT
 
 
@@ -4063,7 +4064,7 @@
 !     RCKWRK - Array of real workspace containing real data.
 !                   Data type - real array
 !     CCKWRK - Array of character workspace containing character data.
-!                   Data type - CHARACTER*16 array
+!                   Data type - CHARACTER*18 array
       IMPLICIT DOUBLE PRECISION (A-H, O-Z), INTEGER (I-N)
       DIMENSION ICKWRK(*), RCKWRK(*)
       CHARACTER CCKWRK(*)*(*)
@@ -6394,7 +6395,7 @@
 !     NFAR = number of fall-off parameters in a reaction;          (8)
 !     MAXSP= maximum number of species in a reaction               (6)
 !     MAXTB= maximum number of third bodies for a reaction        (10)
-!     LSYM = character string length of element and species names (16)
+!     LSYM = character string length of element and species names (18)
 !
 !     User input is read from LIN (Unit15), a thermodynamic database
 !     is read from LTHRM (Unit17), printed output is assigned to LOUT
@@ -6626,6 +6627,8 @@
 
       USE chemkinII,    only: IPPLEN, ILASCH, UPCASE, IFIRCH, IPPARR,&
                               chemdat
+      USE chemistry_string_limits, only: species_name_len,            &
+                                          mechanism_line_len
 !ck2015
       USE chemistry_setup, only: mechdir
 !     PLOG collection + cklink v2 packed arrays (stage 1 PLOG plumbing)
@@ -6637,7 +6640,8 @@
 
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 !
-      PARAMETER (MDIM=10,KDIM=3000, MKDIM=MDIM*KDIM,IDIM=9000,LSYM=16,&
+      PARAMETER (MDIM=10,KDIM=3000, MKDIM=MDIM*KDIM,IDIM=9000,        &
+                 LSYM=species_name_len,                                &
                  NPAR=3, NPIDIM=IDIM*NPAR, NPC=5, NPCP2=NPC+2, MAXTP=3,&
                  NTR=MAXTP-1, NKTDIM=NTR*NPCP2*KDIM, MAXSP=8,MAXTB=10,&
                  NLAR=2, NSIDIM=MAXSP*IDIM, NTIDIM=MAXTB*IDIM,&
@@ -6650,18 +6654,22 @@
 !     80-column CHEMKIN card width (real mechanisms contain lines up to
 !     at least 116 characters). Keep thermo-card readers at 80 columns,
 !     but do not truncate mechanism/reaction and auxiliary-data lines.
-      CHARACTER KNAME(KDIM)*(LSYM), ENAME(MDIM)*(LSYM), SUB(80)*256,&
-                KEY(5)*4, LINE*256, IUNITS*80, AUNITS*4, EUNITS*4,&
+      CHARACTER KNAME(KDIM)*(LSYM), ENAME(MDIM)*(LSYM),               &
+                SUB(80)*mechanism_line_len, KEY(5)*4,                 &
+                LINE*mechanism_line_len, IUNITS*80, AUNITS*4,         &
+                EUNITS*4,&
 !               FILETD holds trim(mechdir)//"therm.dat"; mechdir is
 !               len=256 (chemistry_setup), so 80 silently truncated long
 !               paths and therm.dat could not be opened. Match mechdir.
-                VERS*(LSYM), PREC*(LSYM), FILETD*265 !UPCASE*4
+!     VERS/PREC are cklink header metadata with a legacy 16-character
+!     record contract; they are independent of the species-name width.
+                VERS*16, PREC*16, FILETD*265 !UPCASE*4
 !     cklink v2 schema: a leading magic + integer schema version so the
 !     reader can positively identify the format and refuse older/newer
 !     files, replacing the fragile VERS-string check. Bump CK_SCHEMA on
 !     any on-disk layout change.
       CHARACTER(len=8), PARAMETER :: CK_MAGIC = 'SCLKv2  '
-      INTEGER, PARAMETER          :: CK_SCHEMA = 2
+      INTEGER, PARAMETER          :: CK_SCHEMA = 3
 !
       DIMENSION AWT(MDIM), KNCF(MDIM,KDIM), WTM(KDIM), KPHSE(KDIM),&
                 KCHRG(KDIM), A(NPCP2,NTR,KDIM), T(MAXTP,KDIM), NT(KDIM),&
@@ -7388,6 +7396,7 @@
 !             KERR   - logical error flag
 !----------------------------------------------------------------------!
       USE chemkinII, only: IPPLEN, IPPARR, UPCASE
+      USE chemistry_string_limits, only: species_name_len
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 !
       DIMENSION WTM(*), NT(*), T(MAXTP,*), KPHSE(*), KNCF(MDIM,*), &
@@ -7412,7 +7421,10 @@
           UPCASE(SUB(1), 4) .EQ. 'REAC') RETURN
 !
       IF (ILEN.LT.80 .OR. ISTR(80:80).NE.'1') GO TO 10
-      CALL CKCOMP (SUB(1), KNAME, KK, K)
+!     NASA-7 reserves columns 1:18 for the species identifier. Reading
+!     that fixed field supports a full 18-character name even when the
+!     date field starts immediately in column 19 with no separating blank.
+      CALL CKCOMP (ISTR(:species_name_len), KNAME, KK, K)
 !
       IF (K.LE.0)  GO TO 10
       IF (ITHRM(K)) GO TO 10
@@ -7561,13 +7573,15 @@
 !                                      F. Rupley, Div. 8245, 5/13/86
 !----------------------------------------------------------------------!
       USE chemkinII, only: ILASCH, IPPARR, IPPARI, UPCASE
+      USE chemistry_string_limits, only: mechanism_line_len
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 
       DIMENSION NSPEC(*), NREAC(*), NUNK(MAXSP,*), NU(MAXSP,*),       &
                 PAR(NPAR,*), IFAL(*), KFAL(*), ITHB(*), IWL(*), WL(*),&
                 IRNU(*), RNU(MAXSP,*), IPLUS(20), RVAL(10), IVAL(10)
       CHARACTER KNAME(*)*(*), LINE*(*), CNUM(11)*1!, UPCASE*4
-      CHARACTER*80 ISTR, IREAC, IPROD, ISPEC, INAME, ITEMP
+      CHARACTER(len=mechanism_line_len) :: ISTR, IREAC, IPROD, ISPEC, &
+                                            INAME, ITEMP
       LOGICAL KERR, LTHB, LWL, LRSTO
       DATA CNUM/'.','0','1','2','3','4','5','6','7','8','9'/
 !
@@ -8086,6 +8100,7 @@
 !                                        F. Rupley, Div. 8245, 5/27/87
 !----------------------------------------------------------------------!
       USE chemkinII, only: IPPARR, IPPARI, ILASCH, UPCASE
+      USE chemistry_string_limits, only: mechanism_line_len
       USE plog_collect, only: plog_add_line   ! PLOG collection (cklink v2)
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 !
@@ -8101,8 +8116,8 @@
 !
       DIMENSION PLOGV(4)   ! scratch for one `PLOG / P A b E /` line
 !
-      CHARACTER SUB(*)*(*), KNAME(*)*(*), KEY*80, RSTR*256,           & ! UPCASE*4,  &
-                ISTR*256
+      CHARACTER SUB(*)*(*), KNAME(*)*(*), KEY*80,                     & ! UPCASE*4,  &
+                RSTR*mechanism_line_len, ISTR*mechanism_line_len
       LOGICAL KERR, LLAN, LRLT, LTHB, LFAL, LTRO, LSRI, LWL, LREV,    &
               LFORD, LRORD, LEIM, LJAN, LFT1, LEXC
 !
@@ -9328,6 +9343,7 @@
       module chemkin_kiva
 
       use working_precision, only: dp
+      use chemistry_string_limits, only: species_name_len
 
       implicit none
       public
@@ -9350,11 +9366,11 @@
 !        Chemkin Working arrays (MUST BE DOUBLE PRECISION!)
          integer,           dimension(:,:), allocatable, target :: intwork
          double precision,  dimension(:,:), allocatable, target :: reawork
-         character(len=16), dimension(:,:), allocatable, target :: chawork
+         character(len=species_name_len), dimension(:,:), allocatable, target :: chawork
 
          integer,           dimension(:), allocatable :: ICK
          double precision,  dimension(:), allocatable :: RCK
-         character(len=16), dimension(:), allocatable :: CCK
+         character(len=species_name_len), dimension(:), allocatable :: CCK
 
 !        Chemkin problem arrays (elements, species, reactions, eqs)
          integer :: ckne, ckns, cknr, ckneq

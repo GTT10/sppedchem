@@ -522,6 +522,7 @@ end module sparse_chemistry
 module speedchem
 
    use working_precision, only: dp
+   use chemistry_string_limits, only: species_name_len
    implicit none
    public
 
@@ -593,7 +594,7 @@ module speedchem
    integer                            :: nTHREE, nTB
 
 !     ** character strings for elements and species
-   character(len=18), dimension(:), allocatable :: specie
+   character(len=species_name_len), dimension(:), allocatable :: specie
    character(len=2) , dimension(:), allocatable :: elementi
 
 !     ** Storage of chemistry jacobian sparsity ************************
