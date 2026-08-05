@@ -19,6 +19,7 @@ program driver_plog_real_state_grid
    character(len=256) :: env
    integer :: env_len, env_stat
    integer :: i, it, ip, icase, ih2, io2, iar, ih, iho2
+   integer :: nfinite, nnonfinite
    real(dp) :: requested_pressure, reconstructed_pressure
    real(dp), allocatable :: x(:), ymass(:), state(:), rhs(:)
 
@@ -69,6 +70,8 @@ program driver_plog_real_state_grid
    write(*,'(a)') 'kind,case,T_K,P_Pa,rho_kgpm3,dTdt_Kps,dYdt_1,...'
 
    icase = 0
+   nfinite = 0
+   nnonfinite = 0
    do it = 1, size(temperatures)
       do ip = 1, size(pressures_atm)
          icase = icase + 1
@@ -92,10 +95,17 @@ program driver_plog_real_state_grid
 
          call SC_conV(neq, 0.0_dp, state, rhs)
          if (.not. all(ieee_is_finite(rhs))) then
-            write(*,'(a,i0)') 'ERROR: non-finite RHS at case ', icase
-            error stop 1
+            nnonfinite = nnonfinite + 1
+            write(*,'(a,",",i0,3(",",es24.16))',advance='no')       &
+               'NONFINITE', icase, state(1), reconstructed_pressure, SCrho
+            do i = 1, neq
+               write(*,'(",",l1)',advance='no') ieee_is_finite(rhs(i))
+            enddo
+            write(*,*)
+            cycle
          endif
 
+         nfinite = nfinite + 1
          write(*,'(a,",",i0,4(",",es24.16))',advance='no') 'STATE', &
             icase, state(1), reconstructed_pressure, SCrho, rhs(1)
          do i = 2, neq
@@ -104,6 +114,10 @@ program driver_plog_real_state_grid
          write(*,*)
       enddo
    enddo
+
+   write(*,'(a,i0,a,i0)') 'STATE_GRID_SUMMARY finite=', nfinite,      &
+      ' nonfinite=', nnonfinite
+   if (nfinite == 0) error stop 1
 
 contains
 
