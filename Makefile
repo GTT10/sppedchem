@@ -3,6 +3,8 @@
 # Usage:
 #   make                       # ifx build -> ifx/libSpeedCHEM64.a
 #   make FC=mpiifx             # explicit (default)
+#   make test-plog             # reproducible PLOG regression suite
+#   make test-all              # all bundled tests, including OpenMP reload
 #
 # Output layout:
 #   ifx/
@@ -98,8 +100,37 @@ $(MODULEDIR):
 $(BUILDDIR)/%.o: $(SRCDIR)/%.f90 | $(BUILDDIR) $(MODULEDIR)
 	$(FC) $(FFLAGS) -o $@ $<
 
+# Reproducible regression entry points. The real-mechanism test is kept
+# separate because it depends on an external mechanism repository and Cantera.
+test-smoke:
+	./scripts/run_tests.sh
+
+test-plog:
+	./scripts/run_plog_tests.sh
+	./scripts/run_plog_eval_tests.sh
+	./scripts/run_neg_tests.sh
+
+test-lifecycle:
+	./scripts/run_reload_tests.sh
+	./scripts/run_long_string_tests.sh
+
+test-openmp:
+	./scripts/run_openmp_reload_tests.sh
+
+test:
+	$(MAKE) test-smoke
+	$(MAKE) test-plog
+	$(MAKE) test-lifecycle
+
+test-all:
+	$(MAKE) test
+	$(MAKE) test-openmp
+
+test-real-plog:
+	./scripts/run_plog_real_mechanism.sh
+
 # 掃除用
 clean:
 	rm -rf $(OUTDIR)
 
-.PHONY: all clean
+.PHONY: all clean test-smoke test-plog test-lifecycle test-openmp test test-all test-real-plog
