@@ -117,7 +117,10 @@ program driver_plog_real_state_grid
 
    write(*,'(a,i0,a,i0)') 'STATE_GRID_SUMMARY finite=', nfinite,      &
       ' nonfinite=', nnonfinite
-   if (nfinite == 0) error stop 1
+   if (nnonfinite /= 0 .or. nfinite /= icase) then
+      write(*,'(a)') 'ERROR: every real-mechanism RHS state must be finite'
+      error stop 1
+   endif
 
 contains
 
