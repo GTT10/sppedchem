@@ -1,0 +1,59 @@
+name: SpeedCHEM CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: speedchem-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  intel-ifx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      I_MPI_FABRICS: shm
+      OMP_NUM_THREADS: "2"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure Intel oneAPI APT repository
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gpg-agent wget
+          wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
+            | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update
+
+      - name: Install Intel Fortran compiler and MPI
+        run: |
+          sudo apt-get install -y \
+            intel-oneapi-compiler-fortran \
+            intel-oneapi-mpi-devel
+
+      - name: Report toolchain
+        run: |
+          source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
+          mpiifx --version
+          mpiexec --version
+
+      - name: Run bundled regression suite
+        run: |
+          source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
+          make clean
+          make test-all
+
+      - name: Verify tracked files remain clean
+        run: git diff --exit-code
