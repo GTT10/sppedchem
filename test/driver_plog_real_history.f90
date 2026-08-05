@@ -1,18 +1,18 @@
 program driver_plog_real_history
+   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
    use working_precision, only: dp
    use chemistry_setup, only: mechdir, use_speedchem, solver
    use speedchem, only: ns, nr, neq, specie, molefr_to_massfr,       &
                         massfr_to_molefr
    use SCmixturethermo, only: SCrho, SCP, rhoY, molar_volumes,       &
                               pressurerhoT
-   use ieee_arithmetic, only: ieee_is_finite
    implicit none
 
    real(dp), allocatable :: y(:), atol(:), x(:)
-   real(dp) :: t0, target, tend, temperature0, pressure0, phi
+   real(dp) :: t0, target, tend, temperature0, pressure0
    real(dp) :: prev_time, prev_temp, max_dTdt, dTdt, idt50, frac
    real(dp) :: wall0, wall1, mass_sum, max_mass_error
-   integer :: i, nout, ifuel, io2, in2, ioh, ico, ico2, ih2o
+   integer :: i, nout, ih2, io2, iar, ih, ioh, iho2, ih2o
    character(len=256) :: env
    integer :: env_len, env_stat
 
@@ -26,42 +26,41 @@ program driver_plog_real_history
       mechdir = trim(mechdir)//'/'
    use_speedchem = .true.
 
-   temperature0 = env_real('SC_T0', 1000.0_dp)
-   pressure0    = env_real('SC_P0', 2.0e6_dp)
-   phi          = env_real('SC_PHI', 1.0_dp)
-   tend         = env_real('SC_TEND', 1.2e-3_dp)
-   nout         = env_integer('SC_NOUT', 240)
+   temperature0 = env_real('SC_T0', 1200.0_dp)
+   pressure0    = env_real('SC_P0', 10.0_dp*101325.0_dp)
+   tend         = env_real('SC_TEND', 2.0e-3_dp)
+   nout         = env_integer('SC_NOUT', 400)
    if (temperature0 <= 0.0_dp .or. pressure0 <= 0.0_dp .or.          &
-       phi <= 0.0_dp .or. tend <= 0.0_dp .or. nout < 2) then
+       tend <= 0.0_dp .or. nout < 2) then
       write(*,'(a)') 'ERROR: invalid real-mechanism history settings'
       error stop 1
    endif
 
    call chemistry_input
 
-   ifuel = species_index('NC16H34')
-   io2   = species_index('O2')
-   in2   = species_index('N2')
-   ioh   = species_index('OH')
-   ico   = species_index('CO')
-   ico2  = species_index('CO2')
-   ih2o  = species_index('H2O')
-   if (min(ifuel,io2,in2,ioh,ico,ico2,ih2o) == 0) then
-      write(*,'(a)') 'ERROR: required history species are missing'
+   ih2  = species_index('H2')
+   io2  = species_index('O2')
+   iar  = species_index('AR')
+   ih   = species_index('H')
+   ioh  = species_index('OH')
+   iho2 = species_index('HO2')
+   ih2o = species_index('H2O')
+   if (min(ih2, io2, iar, ih, ioh, iho2, ih2o) == 0) then
+      write(*,'(a)') 'ERROR: required C3Mech history species are missing'
       error stop 1
    endif
 
    allocate(y(neq), atol(neq), x(ns))
    x = 0.0_dp
-   x(ifuel) = 1.0_dp
-   x(io2) = 24.5_dp/phi
-   x(in2) = 3.76_dp*x(io2)
+   x(ih2) = 2.0_dp
+   x(io2) = 1.0_dp
+   x(iar) = 7.0_dp
    x = x/sum(x)
 
    y = 0.0_dp
    y(1) = temperature0
    call molefr_to_massfr(x, y(2:neq))
-   atol = 1.0e-15_dp
+   atol = 1.0e-18_dp
    atol(1) = 1.0e-8_dp
 
 !  Constant-volume state: establish density from the requested initial
@@ -74,7 +73,8 @@ program driver_plog_real_history
    write(*,'(a,i0,a,i0,a,es24.16,a,es24.16,a,es24.16)')               &
       '# REAL_PLOG ns=',ns,' nr=',nr,' rho=',SCrho,' T0=',temperature0,&
       ' P0=',pressure0
-   write(*,'(a)') 'kind,time_s,T_K,P_Pa,X_NC16H34,X_O2,X_OH,X_CO,X_CO2,X_H2O,sumY'
+   write(*,'(a)')                                                      &
+      'kind,time_s,T_K,P_Pa,X_H2,X_O2,X_H,X_OH,X_HO2,X_H2O,X_AR,sumY'
 
    t0 = 0.0_dp
    prev_time = 0.0_dp
@@ -87,9 +87,13 @@ program driver_plog_real_history
 
    do i = 1, nout
       target = tend*real(i,dp)/real(nout,dp)
-      call chemistry_ODE_integrate(neq, 1.0e-7_dp, atol, t0, target, y)
+      call chemistry_ODE_integrate(neq, 1.0e-8_dp, atol, t0, target, y)
       if (.not. all(ieee_is_finite(y))) then
          write(*,'(a)') 'ERROR: non-finite state in real PLOG history'
+         error stop 1
+      endif
+      if (t0 <= prev_time) then
+         write(*,'(a)') 'ERROR: integrator did not advance time'
          error stop 1
       endif
       dTdt = (y(1)-prev_temp)/(t0-prev_time)
@@ -104,9 +108,9 @@ program driver_plog_real_history
    enddo
    call cpu_time(wall1)
 
-   write(*,'(a,a,a,es24.16,a,es24.16,a,es24.16,a,es24.16)')          &
-      'SUMMARY,',trim(solver),',idt50_s,',idt50,',max_dTdt_Kps,',      &
-      max_dTdt,',cpu_s,',wall1-wall0,',max_sumY_error,',max_mass_error
+   write(*,'(a,",",a,4(",",a,",",es24.16))') 'SUMMARY',           &
+      trim(solver), 'idt50_s', idt50, 'max_dTdt_Kps', max_dTdt,       &
+      'cpu_s', wall1-wall0, 'max_sumY_error', max_mass_error
 
 contains
 
@@ -117,8 +121,8 @@ contains
       pressure = pressurerhoT(y(1),y(2:neq))
       mass_sum = sum(y(2:neq))
       max_mass_error = max(max_mass_error,abs(mass_sum-1.0_dp))
-      write(*,'(a,10(",",es24.16))') 'HIST',time,y(1),pressure,        &
-         x(ifuel),x(io2),x(ioh),x(ico),x(ico2),x(ih2o),mass_sum
+      write(*,'(a,11(",",es24.16))') 'HIST',time,y(1),pressure,       &
+         x(ih2),x(io2),x(ih),x(ioh),x(iho2),x(ih2o),x(iar),mass_sum
    end subroutine emit_history
 
    integer function species_index(name) result(idx)
