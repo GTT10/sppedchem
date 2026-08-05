@@ -1,98 +1,200 @@
 #!/usr/bin/env bash
 #
-# Stage-4 integration test against the repo's real LLNL CFD-270 PLOG
-# mechanism. This is intentionally separate from the self-contained fast
-# suite because it depends on ~/projects/mechanism and Cantera.
+# End-to-end validation against a public, published PLOG mechanism:
+# C3MechV4.0.1 MID 2900 (H2/O2 core, CC BY 4.0), pinned to an immutable
+# upstream commit. The exact same CHEMKIN pair is evaluated by SpeedCHEM and
+# converted by Cantera for independent rate, RHS, ignition-history, solver,
+# and MPI comparisons.
 
 set -euo pipefail
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 root_dir=$(cd -- "$script_dir/.." && pwd)
-mechanism_repo=${PLOG_MECH_REPO:-"$HOME/projects/mechanism"}
-source_dir="$mechanism_repo/results/zerork_yaml2ck/llnl_hxn_amn_cfd_lumped270"
-source_mech="$source_dir/llnl_hxn_amn_cfd_lumped270.mech.txt"
-source_therm="$source_dir/llnl_hxn_amn_cfd_lumped270.therm.repaired.txt"
-cantera_python=${PLOG_CANTERA_PYTHON:-"$mechanism_repo/.venv-cantera/bin/python"}
-ck2yaml=${PLOG_CK2YAML:-"$mechanism_repo/.venv-cantera/bin/ck2yaml"}
+cd "$root_dir"
 
-for required in "$source_mech" "$source_therm" "$cantera_python" "$ck2yaml"; do
-  [[ -f "$required" ]] || {
-    echo "run_plog_real_mechanism.sh: missing $required" >&2
+FC=${PLOG_FC:-mpiifx}
+cantera_python=${PLOG_CANTERA_PYTHON:-python3}
+ck2yaml=${PLOG_CK2YAML:-ck2yaml}
+
+source_repo=C3Mech/C3Mech
+source_commit=e9cae8ac06198234300adb8f99e1b3c2e8f65f19
+source_root="https://raw.githubusercontent.com/${source_repo}/${source_commit}"
+source_mech_path=PRECOMPILED/C0/C0/Cantera/C3MechV4.0.1_2900_C0_Cantera.CKI
+source_therm_path=PRECOMPILED/C0/C0/Chemkin/C3MechV4.0.1_2900_C0.THERM
+source_yaml_path=PRECOMPILED/C0/C0/Cantera/C3MechV4.0.1_2900_C0_Cantera.yaml
+source_mech_blob=a91ab6d11018a4b741680fe420037d35f4f23da5
+source_therm_blob=7533a72d9e1c75cb65c32585ffaca5a3ac3481b4
+source_yaml_blob=5cb671203bd6a381bd9a4f4bec1ffb990d40c366
+
+for command in "$FC" mpiexec curl git "$cantera_python" "$ck2yaml"; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    echo "run_plog_real_mechanism.sh: required command '$command' not found" >&2
     exit 2
-  }
+  fi
 done
 
-cd "$root_dir"
+"$cantera_python" - <<'PY'
+import cantera as ct
+print(f"Cantera {ct.__version__}")
+PY
+
 stage_dir=$(mktemp -d)
+output_dir=${PLOG_OUTPUT_DIR:-"$root_dir/ifx/real-plog-results"}
+mkdir -p "$output_dir"
 trap 'rm -rf -- "$stage_dir"' EXIT
-cp "$source_mech" "$stage_dir/chem.inp"
-cp "$source_therm" "$stage_dir/therm.dat"
+
+fetch_pinned() {
+  local relative_path=$1
+  local output=$2
+  local expected_blob=$3
+  curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
+    "$source_root/$relative_path" -o "$output"
+  local actual_blob
+  actual_blob=$(git hash-object "$output")
+  if [[ "$actual_blob" != "$expected_blob" ]]; then
+    echo "run_plog_real_mechanism.sh: blob mismatch for $relative_path" >&2
+    echo "  expected: $expected_blob" >&2
+    echo "  actual:   $actual_blob" >&2
+    exit 1
+  fi
+}
+
+fetch_pinned "$source_mech_path"  "$stage_dir/chem.inp"       "$source_mech_blob"
+fetch_pinned "$source_therm_path" "$stage_dir/therm.dat"      "$source_therm_blob"
+fetch_pinned "$source_yaml_path"  "$stage_dir/published.yaml" "$source_yaml_blob"
+
+cat >"$output_dir/SOURCE.txt" <<EOF
+repository=$source_repo
+commit=$source_commit
+chemkin_path=$source_mech_path
+chemkin_blob=$source_mech_blob
+thermo_path=$source_therm_path
+thermo_blob=$source_therm_blob
+published_yaml_path=$source_yaml_path
+published_yaml_blob=$source_yaml_blob
+EOF
 
 echo "======================================================================"
-echo " SpeedCHEM real PLOG mechanism integration (LLNL CFD-270)"
+echo " SpeedCHEM public real-PLOG validation"
+echo "   source   : $source_repo@$source_commit"
+echo "   model    : C3MechV4.0.1 MID 2900"
+echo "   chemistry: H2/O2/Ar with 0.01--300 atm PLOG fit"
 echo "======================================================================"
 
-echo "[1/6] Building library and real-mechanism drivers..."
-make FC=mpiifx -j1 >/dev/null
-mpiifx -extend-source 132 -module ifx/mod -O2 \
-  -c test/driver_plog.f90 -o "$stage_dir/driver_plog.o"
-mpiifx "$stage_dir/driver_plog.o" ifx/libSpeedCHEM64.a \
-  -o "$stage_dir/driver_plog"
-mpiifx -extend-source 132 -module ifx/mod -O2 \
-  -c test/driver_plog_real_history.f90 -o "$stage_dir/driver_history.o"
-mpiifx "$stage_dir/driver_history.o" \
-  -Wl,--start-group ifx/libSpeedCHEM64.a -Wl,--end-group \
-  -o "$stage_dir/driver_history"
-mpiifx -extend-source 132 -module ifx/mod -O2 \
-  -c test/driver_plog_mpi_real.f90 -o "$stage_dir/driver_mpi.o"
-mpiifx "$stage_dir/driver_mpi.o" \
-  -Wl,--start-group ifx/libSpeedCHEM64.a -Wl,--end-group \
-  -o "$stage_dir/driver_mpi"
+read -r expected_ns expected_nr expected_plog expected_terms < <(
+  "$cantera_python" - "$stage_dir/published.yaml" <<'PY'
+import sys
+import cantera as ct
 
-echo "[2/6] Parsing the unmodified 272-species / 1715-reaction mechanism..."
+gas = ct.Solution(sys.argv[1])
+plog = [r for r in gas.reactions()
+        if getattr(r, "reaction_type", "") == "pressure-dependent-Arrhenius"
+        or type(r.rate).__name__ == "PlogRate"]
+terms = sum(len(r.rate.rates) for r in plog)
+print(gas.n_species, gas.n_reactions, len(plog), terms)
+PY
+)
+printf 'Published Cantera metadata: ns=%s nr=%s PLOG=%s terms=%s\n' \
+  "$expected_ns" "$expected_nr" "$expected_plog" "$expected_terms"
+
+TAG=ifx
+LIB="$TAG/libSpeedCHEM64.a"
+DRV_FLAGS=(-extend-source 132 -module "$TAG/mod" -O2)
+
+echo "[1/8] Building SpeedCHEM and public-mechanism drivers..."
+make FC="$FC" -j1 >/dev/null
+[[ -f "$LIB" ]] || { echo "library not produced: $LIB" >&2; exit 1; }
+
+build_driver() {
+  local name=$1
+  "$FC" "${DRV_FLAGS[@]}" -c "test/$name.f90" -o "$stage_dir/$name.o"
+  "$FC" "$stage_dir/$name.o" -Wl,--start-group "$LIB" \
+    -Wl,--end-group -o "$stage_dir/$name"
+}
+
+build_driver driver_plog
+build_driver driver_plog_real_rates
+build_driver driver_plog_real_state_grid
+build_driver driver_plog_real_history
+build_driver driver_plog_mpi_real
+
+echo "[2/8] Parsing and round-tripping the pinned CHEMKIN mechanism..."
 SC_MECHDIR="$stage_dir/" "$stage_dir/driver_plog" >"$stage_dir/parse.log"
-grep -E '^# linked: 272 species, 1715 reactions$' "$stage_dir/parse.log"
-grep -E '^n_plog_reactions 212$' "$stage_dir/parse.log"
-grep -E '^n_plog_nodes 1352$' "$stage_dir/parse.log"
+cat "$stage_dir/parse.log" | grep -E '^# linked:|^n_plog_reactions|^n_plog_nodes'
+linked_ns=$(awk '/^# linked:/{print $3; exit}' "$stage_dir/parse.log")
+linked_nr=$(awk '/^# linked:/{print $5; exit}' "$stage_dir/parse.log")
+linked_plog=$(awk '/^n_plog_reactions/{print $2; exit}' "$stage_dir/parse.log")
+linked_terms=$(awk '/^n_plog_nodes/{print $2; exit}' "$stage_dir/parse.log")
+if [[ "$linked_ns" != "$expected_ns" || "$linked_nr" != "$expected_nr" || \
+      "$linked_plog" != "$expected_plog" || "$linked_terms" != "$expected_terms" ]]; then
+  echo "SpeedCHEM/Cantera mechanism topology mismatch" >&2
+  echo "  SpeedCHEM: $linked_ns $linked_nr $linked_plog $linked_terms" >&2
+  echo "  Cantera:   $expected_ns $expected_nr $expected_plog $expected_terms" >&2
+  exit 1
+fi
 
-echo "[3/6] Converting the exact staged CHEMKIN pair for Cantera..."
+echo "[3/8] Regenerating Cantera YAML from the exact staged CHEMKIN pair..."
 "$ck2yaml" --input="$stage_dir/chem.inp" --thermo="$stage_dir/therm.dat" \
   --output="$stage_dir/reference.yaml" --permissive \
   >"$stage_dir/ck2yaml.log" 2>&1
+"$cantera_python" - "$stage_dir/reference.yaml" <<'PY'
+import sys
+import cantera as ct
 
-real_nout=${SC_REAL_NOUT:-240}
-echo "[4/6] Running numerical-Jacobian ignition history..."
-SC_MECHDIR="$stage_dir/" SC_SOLVER=LSODES SC_NOUT="$real_nout" \
-  OMP_NUM_THREADS=1 "$stage_dir/driver_history" >"$stage_dir/numeric.log"
+gas = ct.Solution(sys.argv[1])
+print(f"Regenerated Cantera mechanism: {gas.n_species} species, {gas.n_reactions} reactions")
+PY
+
+echo "[4/8] Comparing every real PLOG rate over T/P nodes, intervals, and clamps..."
+SC_MECHDIR="$stage_dir/" "$stage_dir/driver_plog_real_rates" \
+  >"$stage_dir/rates.log"
+grep '^# REAL_PLOG_RATES' "$stage_dir/rates.log"
+
+echo "[5/8] Evaluating the complete constant-volume RHS over a 33-state grid..."
+SC_MECHDIR="$stage_dir/" "$stage_dir/driver_plog_real_state_grid" \
+  >"$stage_dir/states.log"
+printf 'State rows: %s\n' "$(grep -c '^STATE,' "$stage_dir/states.log")"
+
+echo "[6/8] Integrating H2/O2/Ar ignition with numeric and analytic Jacobians..."
+real_t0=${SC_REAL_T0:-1200.0}
+real_p0=${SC_REAL_P0:-1013250.0}
+real_tend=${SC_REAL_TEND:-0.002}
+real_nout=${SC_REAL_NOUT:-400}
+common_history_env=(
+  SC_MECHDIR="$stage_dir/"
+  SC_T0="$real_t0"
+  SC_P0="$real_p0"
+  SC_TEND="$real_tend"
+  SC_NOUT="$real_nout"
+  OMP_NUM_THREADS=1
+)
+env "${common_history_env[@]}" SC_SOLVER=LSODES \
+  "$stage_dir/driver_plog_real_history" >"$stage_dir/numeric.log"
+env "${common_history_env[@]}" SC_SOLVER=LSODESJAC \
+  "$stage_dir/driver_plog_real_history" >"$stage_dir/analytic.log"
 grep '^SUMMARY' "$stage_dir/numeric.log"
+grep '^SUMMARY' "$stage_dir/analytic.log"
 
-analytic_args=()
-if [[ ${SC_RUN_HEAVY_ANALYTIC:-0} == 1 ]]; then
-  analytic_nout=${SC_REAL_ANALYTIC_NOUT:-$real_nout}
-  echo "      Running analytical-Jacobian cross-check..."
-  SC_MECHDIR="$stage_dir/" SC_SOLVER=LSODESJAC \
-    SC_NOUT="$analytic_nout" OMP_NUM_THREADS=1 \
-    "$stage_dir/driver_history" >"$stage_dir/analytic.log"
-  grep '^SUMMARY' "$stage_dir/analytic.log"
-  analytic_args=(--analytic "$stage_dir/analytic.log")
-  if [[ $analytic_nout == "$real_nout" ]]; then
-    numeric_cpu=$(awk -F, '/^SUMMARY/{print $8}' "$stage_dir/numeric.log")
-    analytic_cpu=$(awk -F, '/^SUMMARY/{print $8}' "$stage_dir/analytic.log")
-    speedup=$(awk -v numeric="$numeric_cpu" -v analytic="$analytic_cpu" \
-      'BEGIN { printf "%.6f", numeric/analytic }')
-    echo "BENCHMARK,nout,$real_nout,numeric_cpu_s,$numeric_cpu,analytic_cpu_s,$analytic_cpu,numeric_over_analytic,$speedup"
-  fi
-fi
-
-echo "[5/6] Comparing IDT, dT/dt, T/P history, and major species..."
+echo "[7/8] Comparing rates, full RHS, ignition history, and solver paths with Cantera..."
 PYTHONWARNINGS=ignore "$cantera_python" test/compare_real_plog.py \
   --mechanism "$stage_dir/reference.yaml" \
-  --numeric "$stage_dir/numeric.log" "${analytic_args[@]}"
+  --published "$stage_dir/published.yaml" \
+  --rates "$stage_dir/rates.log" \
+  --states "$stage_dir/states.log" \
+  --numeric "$stage_dir/numeric.log" \
+  --analytic "$stage_dir/analytic.log" | tee "$stage_dir/comparison.log"
 
-echo "[6/6] Checking real PLOG rates and Jacobian on 2 MPI ranks..."
+echo "[8/8] Checking PLOG rate, RHS, and analytic Jacobian on two MPI ranks..."
 SC_MECHDIR="$stage_dir/" SC_SOLVER=LSODESJAC OMP_NUM_THREADS=1 \
-  mpiexec -n 2 "$stage_dir/driver_mpi"
+  mpiexec -n 2 "$stage_dir/driver_plog_mpi_real" | tee "$stage_dir/mpi.log"
+
+cp "$stage_dir/parse.log" "$stage_dir/ck2yaml.log" \
+   "$stage_dir/rates.log" "$stage_dir/states.log" \
+   "$stage_dir/numeric.log" "$stage_dir/analytic.log" \
+   "$stage_dir/comparison.log" "$stage_dir/mpi.log" \
+   "$output_dir/"
 
 echo "======================================================================"
-echo " RESULT: PASS — LLNL CFD-270 PLOG integration is independently verified"
+echo " RESULT: PASS - public C3Mech PLOG mechanism independently verified"
+echo " Results: $output_dir"
 echo "======================================================================"
