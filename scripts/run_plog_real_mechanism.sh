@@ -119,14 +119,15 @@ build_driver() {
     -Wl,--end-group -o "$stage_dir/$name"
 }
 
-echo "[1/8] Build library and drivers"
+echo "[1/9] Build library and drivers"
 make FC="$FC" -j1 >/dev/null
-for driver in driver_plog driver_plog_real_rates driver_plog_real_state_grid \
-              driver_plog_real_history driver_plog_mpi_real; do
+for driver in driver_plog driver_plog_real_rates driver_plog_real_debug \
+              driver_plog_real_state_grid driver_plog_real_history \
+              driver_plog_mpi_real; do
   build_driver "$driver"
 done
 
-echo "[2/8] Parse and round-trip pinned CHEMKIN"
+echo "[2/9] Parse and round-trip pinned CHEMKIN"
 run_logged "$stage_dir/parse.log" env SC_MECHDIR="$stage_dir/" \
   "$stage_dir/driver_plog"
 grep -E '^# linked:|^n_plog_reactions|^n_plog_nodes' "$stage_dir/parse.log"
@@ -140,7 +141,7 @@ linked_terms=$(awk '/^n_plog_nodes/{print $2; exit}' "$stage_dir/parse.log")
   exit 1
 }
 
-echo "[3/8] Convert exact CHEMKIN pair with Cantera"
+echo "[3/9] Convert exact CHEMKIN pair with Cantera"
 run_logged "$stage_dir/ck2yaml.log" "$ck2yaml" \
   --input="$stage_dir/chem.inp" --thermo="$stage_dir/therm.dat" \
   --output="$stage_dir/reference.yaml" --permissive
@@ -151,17 +152,22 @@ gas = ct.Solution(sys.argv[1])
 print(f"Regenerated: {gas.n_species} species, {gas.n_reactions} reactions")
 PY
 
-echo "[4/8] Evaluate PLOG rate grid"
+echo "[4/9] Evaluate PLOG rate grid"
 run_logged "$stage_dir/rates.log" env SC_MECHDIR="$stage_dir/" \
   "$stage_dir/driver_plog_real_rates"
 grep '^# REAL_PLOG_RATES' "$stage_dir/rates.log"
 
-echo "[5/8] Evaluate complete constant-volume RHS grid"
+echo "[5/9] Decompose the real PLOG forward/reverse reaction path"
+run_logged "$stage_dir/debug.log" env SC_MECHDIR="$stage_dir/" \
+  "$stage_dir/driver_plog_real_debug"
+grep '^DEBUG' "$stage_dir/debug.log"
+
+echo "[6/9] Evaluate complete constant-volume RHS grid"
 run_logged "$stage_dir/states.log" env SC_MECHDIR="$stage_dir/" \
   "$stage_dir/driver_plog_real_state_grid"
 printf 'State rows: %s\n' "$(grep -c '^STATE,' "$stage_dir/states.log")"
 
-echo "[6/8] Integrate numeric and analytic-Jacobian histories"
+echo "[7/9] Integrate numeric and analytic-Jacobian histories"
 real_t0=${SC_REAL_T0:-1200.0}
 real_p0=${SC_REAL_P0:-1013250.0}
 real_tend=${SC_REAL_TEND:-0.002}
@@ -175,7 +181,7 @@ run_logged "$stage_dir/analytic.log" env "${common_env[@]}" SC_SOLVER=LSODESJAC 
 grep '^SUMMARY' "$stage_dir/numeric.log"
 grep '^SUMMARY' "$stage_dir/analytic.log"
 
-echo "[7/8] Compare rates, RHS, and histories with Cantera"
+echo "[8/9] Compare rates, RHS, and histories with Cantera"
 run_logged "$stage_dir/comparison.log" env PYTHONWARNINGS=ignore \
   "$cantera_python" test/compare_real_plog.py \
   --mechanism "$stage_dir/reference.yaml" --published "$stage_dir/published.yaml" \
@@ -183,7 +189,7 @@ run_logged "$stage_dir/comparison.log" env PYTHONWARNINGS=ignore \
   --numeric "$stage_dir/numeric.log" --analytic "$stage_dir/analytic.log"
 cat "$stage_dir/comparison.log"
 
-echo "[8/8] Check two-rank MPI rate/RHS/Jacobian equality"
+echo "[9/9] Check two-rank MPI rate/RHS/Jacobian equality"
 run_logged "$stage_dir/mpi.log" env SC_MECHDIR="$stage_dir/" \
   SC_SOLVER=LSODESJAC OMP_NUM_THREADS=1 mpiexec -n 2 \
   "$stage_dir/driver_plog_mpi_real"
