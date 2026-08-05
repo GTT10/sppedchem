@@ -30,8 +30,7 @@ program driver_smoke
     ! --- Configuration -----------------------------------------------------------------------
     character(len=256) :: mech
     integer            :: env_len, env_stat
-    ! Optional solver override (SC_SOLVER): pick a numeric-Jacobian solver for
-    ! Optional solver override for targeted solver regression tests.
+    ! Optional SC_SOLVER override for targeted solver regression tests.
     character(len=15)  :: solver_override
     integer            :: sv_len, sv_stat
 
