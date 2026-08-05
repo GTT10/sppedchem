@@ -11,7 +11,7 @@ program driver_plog_mpi_real
                               pressurerhoT
    implicit none
 
-   integer :: ierr, rank, nproc, i, ifuel, io2, in2
+   integer :: ierr, rank, nproc, i, ih2, io2, iar, ih, iho2
    integer :: env_len, env_stat
    character(len=256) :: env
    real(dp), allocatable :: y(:), x(:), rhs(:), kinf(:)
@@ -36,23 +36,30 @@ program driver_plog_mpi_real
    call SCbroadcast
 
    allocate(y(neq),x(ns),rhs(neq),kinf(nr))
-   ifuel=0; io2=0; in2=0
+   ih2=0; io2=0; iar=0; ih=0; iho2=0
    do i=1,ns
-      if (trim(specie(i)) == 'NC16H34') ifuel=i
-      if (trim(specie(i)) == 'O2') io2=i
-      if (trim(specie(i)) == 'N2') in2=i
+      if (trim(specie(i)) == 'H2')  ih2=i
+      if (trim(specie(i)) == 'O2')  io2=i
+      if (trim(specie(i)) == 'AR')  iar=i
+      if (trim(specie(i)) == 'H')   ih=i
+      if (trim(specie(i)) == 'HO2') iho2=i
    enddo
-   if (min(ifuel,io2,in2) == 0) call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+   if (min(ih2,io2,iar,ih,iho2) == 0) then
+      if (rank == 0) write(*,'(a)') 'ERROR: required C3Mech species missing'
+      call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+   endif
 
    x=0.0_dp
-   x(ifuel)=1.0_dp
-   x(io2)=24.5_dp
-   x(in2)=3.76_dp*x(io2)
+   x(ih2)=2.0_dp
+   x(io2)=1.0_dp
+   x(iar)=7.0_dp
+   x(ih)=1.0e-5_dp
+   x(iho2)=1.0e-8_dp
    x=x/sum(x)
    y=0.0_dp
    y(1)=1000.0_dp
    call molefr_to_massfr(x,y(2:neq))
-   SCP=2.0e6_dp
+   SCP=7.071067811865476_dp*101325.0_dp
    call rhoY(y(2:neq),y(1))
    call molar_volumes
    pressure=pressurerhoT(y(1),y(2:neq))
@@ -77,14 +84,14 @@ program driver_plog_mpi_real
                       MPI_MIN,MPI_COMM_WORLD,ierr)
    call MPI_Allreduce(local,vmax,size(local),MPI_DOUBLE_PRECISION,     &
                       MPI_MAX,MPI_COMM_WORLD,ierr)
-   if (nproc < 2 .or. any(vmin /= vmax) .or.                          &
-       n_plog_reactions /= 212 .or. n_plog_nodes /= 1352) then
+   if (nproc < 2 .or. any(vmin /= vmax) .or.                         &
+       n_plog_reactions /= 1 .or. n_plog_nodes /= 11) then
       if (rank == 0) write(*,'(a)')                                   &
-         'RESULT: FAIL - real PLOG MPI rate/Jacobian mismatch'
+         'RESULT: FAIL - public real-PLOG MPI rate/Jacobian mismatch'
       call MPI_Abort(MPI_COMM_WORLD,1,ierr)
    endif
    if (rank == 0) write(*,'(a,i0,a,es12.4,a,i0)')                     &
-      'RESULT: PASS - real PLOG rates/Jacobian identical on ',nproc,  &
-      ' ranks; dTdt=',rhs(1),' jac_nnz=',JAC_sparse%n
+      'RESULT: PASS - public real-PLOG rates/Jacobian identical on ', &
+      nproc,' ranks; dTdt=',rhs(1),' jac_nnz=',JAC_sparse%n
    call MPI_Finalize(ierr)
 end program driver_plog_mpi_real
