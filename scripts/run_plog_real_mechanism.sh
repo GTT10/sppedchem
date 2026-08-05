@@ -181,12 +181,13 @@ run_logged "$stage_dir/analytic.log" env "${common_env[@]}" SC_SOLVER=LSODESJAC 
 grep '^SUMMARY' "$stage_dir/numeric.log"
 grep '^SUMMARY' "$stage_dir/analytic.log"
 
-echo "[8/9] Compare rates, RHS, and histories with Cantera"
+echo "[8/9] Compare PLOG rates/ROP and solver histories with Cantera"
 run_logged "$stage_dir/comparison.log" env PYTHONWARNINGS=ignore \
   "$cantera_python" test/compare_real_plog.py \
   --mechanism "$stage_dir/reference.yaml" --published "$stage_dir/published.yaml" \
-  --rates "$stage_dir/rates.log" --states "$stage_dir/states.log" \
-  --numeric "$stage_dir/numeric.log" --analytic "$stage_dir/analytic.log"
+  --rates "$stage_dir/rates.log" --debug "$stage_dir/debug.log" \
+  --states "$stage_dir/states.log" --numeric "$stage_dir/numeric.log" \
+  --analytic "$stage_dir/analytic.log"
 cat "$stage_dir/comparison.log"
 
 echo "[9/9] Check two-rank MPI rate/RHS/Jacobian equality"
