@@ -4989,10 +4989,12 @@ contains
 !     Computing reaction rate constants according to Troe's formulation
       troefactors: if (ntbTROE > 0) then
 
-         Pr2 = Pr(iTROEitbFALL)
+         Pr2 = max(Pr(iTROEitbFALL), sqrt(tiny(one)))
 
 !        ** Computing troe centering factor
-         log10Pr    = log10(Pr2/(one-Pr2))
+!        Species-specific collider channels can have M=0 and therefore
+!        Pr=0. Evaluate the Pr->0 limit without log10(0) or Inf/Inf.
+         log10Pr = log10(Pr2) - log10(max(one-Pr2, tiny(one)))
 
 !        ** Troe model parameters
          ctroe = -0.40_dp - 0.67_dp * log10Fcent

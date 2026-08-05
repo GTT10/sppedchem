@@ -706,10 +706,12 @@
 !     Computing reaction rate constants according to Troe's form
       troefactors: if (ntbTROE > 0) then
 
-        Pr2 = Pr(iTROEiTBFALL)
+        Pr2 = max(Pr(iTROEiTBFALL), sqrt(tiny(one)))
 
 !       ** Computing troe centering factor
-         log10Pr    = log10(Pr2/(one-Pr2))
+!       Species-specific collider channels can have M=0 and therefore
+!       Pr=0. Evaluate the Pr->0 limit without log10(0) or Inf/Inf.
+         log10Pr = log10(Pr2) - log10(max(one-Pr2, tiny(one)))
 
 !        ** Troe model parameters
          ctroe = -0.40_dp - 0.67_dp * log10Fcent
@@ -725,6 +727,9 @@
       endif troefactors
 
       if (ntbFALL > 0) then
+!        A zero collider is valid. This working-precision floor is
+!        chemically negligible and keeps q/FTL derivatives finite.
+         FTL = max(FTL, sqrt(tiny(one)))
          kf(itbFALL) = kf(itbFALL) * FTL
 !        Reciprocal of pressure-dependent reaction factor
          uFTL = one/FTL
@@ -911,9 +916,10 @@
          dFTL_dY_sp                    = sparse_col_prod(dMeff_dY_sp, prod_rate_consts)
 
 !        B) Troe reactions
-         Pr_dlogFT_dlodPr_uMi              = one
-         Pr_dlogFT_dlodPr_uMi(iTROEitbALL) = Pr_dlogFT_dlodPr_uMi(iTROEitbALL) &
-                                           * Pr2 * dlogFtroe_dlogPr /M(iTROEitbALL)
+         Pr_dlogFT_dlodPr_uMi = one
+!        Exact zero-safe identity: Pr/M = k0/(kinf+k0*M).
+         Pr_dlogFT_dlodPr_uMi(iTROEitbALL) = dlogFtroe_dlogPr *       &
+              k0(iTROEitbFALL) * ukinfpmk0(iTROEitbFALL)
 
          tmp_sp = dFTL_dY_sp + sparse_col_prod(dMeff_dY_sp, Pr_dlogFT_dlodPr_uMi)
          dFTL_dY_sp = tmp_sp
