@@ -13,7 +13,7 @@ program driver_plog_real_debug
                               pressurerhoT
    use speedchem_conV, only: SC_conV
    use sparse_chemistry, only: stoich_r_sp, stoich_p_sp
-   use sparse_definitions, only: sparse_value
+   use sparse_algebra, only: sparse_value
    implicit none
 
    character(len=256) :: env
