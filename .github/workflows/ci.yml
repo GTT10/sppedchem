@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: speedchem-ci-${{ github.workflow }}-${{ github.ref }}
@@ -26,53 +26,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-
-      - name: Apply and publish sparse zero-product fix
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/plog-support'
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("src/SCsparse_definitions.f90")
-          text = path.read_text()
-          old = (
-              "      if (a == 0.e0_dp) then\n"
-              "         call deallocate(C)\n"
-              "      else\n"
-              "         ! Initialize matrix\n"
-              "         call allocate(B%nr, B%nc, B%n, C)\n"
-              "\n"
-              "         ! Perform multiplication\n"
-              "         C%IA = B%IA\n"
-              "         C%JA (1:C%n) = B%JA(1:C%n)\n"
-              "         C%A  (1:C%n) = B%A (1:C%n) * a\n"
-              "      endif\n"
-          )
-          new = (
-              "!     Preserve dimensions for B*a exactly as for a*B, including a=0.\n"
-              "!     Both overloads must return the same initialized sparse structure so\n"
-              "!     later sums with absent optional chemistry terms remain well-defined.\n"
-              "      call allocate(B%nr, B%nc, B%n, C)\n"
-              "      C%IA = B%IA\n"
-              "      C%JA (1:C%n) = B%JA(1:C%n)\n"
-              "      C%A  (1:C%n) = B%A (1:C%n) * a\n"
-          )
-          if old in text:
-              path.write_text(text.replace(old, new, 1))
-          elif new not in text:
-              raise SystemExit("expected sparse_dot_double block not found")
-          PY
-
-          if git diff --quiet; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/SCsparse_definitions.f90
-          git commit -m "fix sparse zero scalar-product symmetry"
-          git push origin HEAD:feature/plog-support
 
       - name: Set up Python
         uses: actions/setup-python@v6
