@@ -1922,17 +1922,13 @@
       type(sparse)    , intent(in) :: B
       type(sparse)                 :: C
 
-      if (a == 0.e0_dp) then
-         call deallocate(C)
-      else
-         ! Initialize matrix
-         call allocate(B%nr, B%nc, B%n, C)
-
-         ! Perform multiplication
-         C%IA = B%IA
-         C%JA (1:C%n) = B%JA(1:C%n)
-         C%A  (1:C%n) = B%A (1:C%n) * a
-      endif
+!     Preserve dimensions for B*a exactly as for a*B, including a=0.
+!     Both overloads must return the same initialized sparse structure so
+!     later sums with absent optional chemistry terms remain well-defined.
+      call allocate(B%nr, B%nc, B%n, C)
+      C%IA = B%IA
+      C%JA (1:C%n) = B%JA(1:C%n)
+      C%A  (1:C%n) = B%A (1:C%n) * a
 
       end function sparse_dot_double
 
