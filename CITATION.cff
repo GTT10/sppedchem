@@ -1,0 +1,87 @@
+cff-version: 1.2.0
+message: >-
+  Please cite the original SpeedCHEM methods paper and identify the exact
+  repository revision used in your work. If you use the bundled PRF test
+  mechanism scientifically, also cite the Fan et al. mechanism paper listed
+  below.
+title: "SpeedCHEM: community-maintained Fortran chemical-kinetics library"
+type: software
+authors:
+  - family-names: Perini
+    given-names: Federico
+  - name: GTT10 contributors
+version: 0.1.0
+repository-code: "https://github.com/GTT10/sppedchem"
+url: "https://www.federicoperini.info/speedchem"
+license: GPL-3.0-or-later
+abstract: >-
+  SpeedCHEM is a Fortran library for stiff gas-phase chemical kinetics using
+  sparse analytical Jacobians. This repository maintains and extends the
+  original SpeedCHEM source for current research workflows.
+keywords:
+  - chemical kinetics
+  - combustion
+  - sparse Jacobian
+  - Fortran
+  - PLOG
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Perini
+      given-names: Federico
+    - family-names: Galligani
+      given-names: Emanuele
+    - family-names: Reitz
+      given-names: Rolf D.
+  title: >-
+    An Analytical Jacobian Approach to Sparse Reaction Kinetics for
+    Computationally Efficient Combustion Modeling with Large Reaction
+    Mechanisms
+  journal: Energy & Fuels
+  year: 2012
+  volume: 26
+  issue: 8
+  start: 4804
+  end: 4822
+  doi: 10.1021/ef300747n
+references:
+  - type: article
+    authors:
+      - family-names: Perini
+        given-names: Federico
+      - family-names: Galligani
+        given-names: Emanuele
+      - family-names: Reitz
+        given-names: Rolf D.
+    title: >-
+      A Study of Direct and Krylov Iterative Sparse Solver Techniques to
+      Approach Linear Scaling of the Integration of Chemical Kinetics with
+      Detailed Combustion Mechanisms
+    journal: Combustion and Flame
+    year: 2014
+    volume: 161
+    issue: 5
+    start: 1180
+    end: 1195
+    doi: 10.1016/j.combustflame.2013.11.017
+  - type: article
+    authors:
+      - family-names: Fan
+        given-names: Weiwei
+      - family-names: Jia
+        given-names: Ming
+      - family-names: Chang
+        given-names: Yachao
+      - family-names: Xie
+        given-names: Maozhao
+    title: >-
+      Understanding the Relationship between Cetane Number and the Ignition
+      Delay in Shock Tubes for Different Fuels Based on a Skeletal Primary
+      Reference Fuel (n-Hexadecane/Iso-cetane) Mechanism
+    journal: Energy & Fuels
+    year: 2015
+    volume: 29
+    issue: 5
+    start: 3413
+    end: 3427
+    doi: 10.1021/ef5028185
