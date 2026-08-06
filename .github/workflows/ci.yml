@@ -29,7 +29,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
-      - name: Apply sparse zero-product fix and restore clean CI
+      - name: Apply and publish sparse zero-product fix
         if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/plog-support'
         run: |
           python3 - <<'PY'
@@ -63,100 +63,12 @@ jobs:
               raise SystemExit("expected sparse_dot_double block not found")
           PY
 
-          rm -f .github/workflows/patch_sparse_zero_product.yml
-          cat > .github/workflows/ci.yml <<'EOF'
-          name: SpeedCHEM CI
-
-          on:
-            pull_request:
-            push:
-              branches:
-                - master
-            workflow_dispatch:
-
-          permissions:
-            contents: read
-
-          concurrency:
-            group: speedchem-ci-${{ github.workflow }}-${{ github.ref }}
-            cancel-in-progress: true
-
-          jobs:
-            intel-ifx:
-              runs-on: ubuntu-24.04
-              timeout-minutes: 90
-              env:
-                I_MPI_FABRICS: shm
-                OMP_NUM_THREADS: "2"
-
-              steps:
-                - name: Check out repository
-                  uses: actions/checkout@v6
-                  with:
-                    fetch-depth: 0
-
-                - name: Set up Python
-                  uses: actions/setup-python@v6
-                  with:
-                    python-version: "3.12"
-
-                - name: Install Cantera reference implementation
-                  run: |
-                    python -m pip install --upgrade pip
-                    python -m pip install "cantera==3.2.0"
-                    python - <<'PY'
-                    import cantera as ct
-                    print("Cantera", ct.__version__)
-                    PY
-
-                - name: Configure Intel oneAPI APT repository
-                  run: |
-                    sudo apt-get update
-                    sudo apt-get install -y gpg-agent wget
-                    wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
-                      | gpg --dearmor \
-                      | sudo tee /usr/share/keyrings/oneapi-archive-keyring.gpg >/dev/null
-                    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
-                      | sudo tee /etc/apt/sources.list.d/oneAPI.list
-                    sudo apt-get update
-
-                - name: Install Intel Fortran compiler and MPI
-                  run: |
-                    sudo apt-get install -y \
-                      intel-oneapi-compiler-fortran \
-                      intel-oneapi-mpi-devel
-
-                - name: Report toolchain
-                  run: |
-                    source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
-                    mpiifx --version
-                    mpiexec --version
-                    python --version
-                    ck2yaml --help >/dev/null
-
-                - name: Run bundled regression suite
-                  run: |
-                    source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
-                    make clean
-                    make test-all
-
-                - name: Run pinned public C3Mech PLOG validation
-                  run: |
-                    source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
-                    PLOG_CANTERA_PYTHON="$(command -v python)" \
-                    PLOG_CK2YAML="$(command -v ck2yaml)" \
-                    make test-real-plog
-
-                - name: Verify tracked files remain clean
-                  run: git diff --exit-code
-          EOF
-
           if git diff --quiet; then
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add src/SCsparse_definitions.f90
           git commit -m "fix sparse zero scalar-product symmetry"
           git push origin HEAD:feature/plog-support
 
