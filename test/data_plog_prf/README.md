@@ -19,6 +19,10 @@ evaluation path (`reacpar::plog_kinf_eval`, called from `mass_action`).
 Because it derives from the working PRF mechanism, it links and builds
 the sparse chemistry cleanly (unlike a hand-built toy mechanism).
 
+## Provenance
+
+This is a locally modified regression fixture derived from the Fan–Jia–Chang–Xie PRF mechanism described in `test/data/README.md`, not an original author release. Its publication attribution and unresolved redistribution status are recorded there and in `THIRD_PARTY_NOTICES.md`. `therm.dat` is copied unchanged from `test/data/`.
+
 ## What it tests
 
 - **RHS equivalence** (`scripts/run_plog_eval_tests.sh`, via
