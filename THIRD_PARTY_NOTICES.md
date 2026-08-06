@@ -90,10 +90,29 @@ No standalone redistribution license for this complete combined file was found i
 
 `src/radau_sparse.f90` identifies Emanuele Galligani and Federico Perini as authors. It is maintained as part of this SpeedCHEM tree; its original authorship notice must remain intact.
 
-## Test-only external mechanism
+## Bundled PRF smoke-test mechanism and thermodynamic data
+
+The following tracked test fixtures contain or derive from a skeletal primary-reference-fuel mechanism:
+
+- `test/data/chem.inp`
+- `test/data/therm.dat`
+- `test/data_plog_prf/chem.inp`
+- `test/data_plog_prf/therm.dat`
+- `test/data_neg_ford/chem.inp`
+- `test/data_neg_ford/therm.dat`
+
+The mechanism header attributes the original n-hexadecane/iso-cetane work to Weiwei Fan, Ming Jia, Yachao Chang, and Maozhao Xie:
+
+> W. Fan, M. Jia, Y. Chang, and M. Xie, “Understanding the Relationship between Cetane Number and the Ignition Delay in Shock Tubes for Different Fuels Based on a Skeletal Primary Reference Fuel (n-Hexadecane/Iso-cetane) Mechanism,” *Energy & Fuels*, 29(5), 3413–3427, 2015. DOI: 10.1021/ef5028185.
+
+The publication states that the skeletal CHEMKIN mechanism and thermodynamic properties are supplied as Supporting Information. The tracked fixture has subsequently been adapted for SpeedCHEM tests, including participant-limit workarounds and PLOG/FORD regression variants; it must not be represented as an unmodified author release.
+
+Neither free online availability nor inclusion in Supporting Information is, by itself, a redistribution license. No explicit license covering redistribution and modification of these tracked mechanism/thermodynamic files was found in this repository during the 2026 metadata review. Preserve the publication attribution, document all local changes, and verify permission or replace the fixtures with clearly licensed equivalents before external redistribution.
+
+## Downloaded test-only C3Mech mechanism
 
 `scripts/run_plog_real_mechanism.sh` downloads a pinned C3Mech mechanism and thermodynamic data at test time. Those files are not vendored into this repository. Their own upstream notices and terms apply to the downloaded material.
 
 ## Open provenance items
 
-The repository deliberately records unresolved provenance instead of assuming that the root GPL notice relicenses every imported solver. See the project issue tracker for the current audit checklist. Until each item is resolved, internal research use and source preservation are lower-risk than redistributing a compiled library or linked application to third parties.
+The repository deliberately records unresolved provenance instead of assuming that the root GPL notice relicenses every imported solver or test dataset. See issue #3 for the current audit checklist. Until each item is resolved, internal research use and source preservation are lower-risk than redistributing a compiled library, linked application, or bundled mechanism data to third parties.
