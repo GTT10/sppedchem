@@ -1,0 +1,62 @@
+name: Project metadata
+
+on:
+  pull_request:
+    paths:
+      - "LICENSE"
+      - "NOTICE"
+      - "README.md"
+      - "CITATION.cff"
+      - "THIRD_PARTY_NOTICES.md"
+      - "CONTRIBUTING.md"
+      - "fpm.toml"
+      - ".github/workflows/metadata.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "LICENSE"
+      - "NOTICE"
+      - "README.md"
+      - "CITATION.cff"
+      - "THIRD_PARTY_NOTICES.md"
+      - "CONTRIBUTING.md"
+      - "fpm.toml"
+      - ".github/workflows/metadata.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate CITATION.cff
+        uses: citation-file-format/cffconvert-github-action@2.0.0
+        with:
+          args: "--validate"
+
+      - name: Verify canonical GPL text and package metadata
+        run: |
+          test "$(git hash-object LICENSE)" = "f6cdd22a6c1fbc887e08a215cb4beb3c47048041"
+          python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          root = pathlib.Path('.')
+          manifest = tomllib.loads((root / 'fpm.toml').read_text())
+          assert manifest['license'] == 'GPL-3.0-or-later'
+          assert manifest['homepage'] == 'https://github.com/GTT10/sppedchem'
+
+          readme = (root / 'README.md').read_text()
+          for required in (
+              'GPL-3.0-or-later',
+              'THIRD_PARTY_NOTICES.md',
+              'CITATION.cff',
+              'https://www.federicoperini.info/speedchem',
+          ):
+              assert required in readme, required
+          PY
