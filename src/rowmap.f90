@@ -278,7 +278,7 @@ subroutine rowmap(n,f,ifcn,t,u,tend,hs,rtol,atol,itol,&
 ! Pointers in array "work".
 !
 
-!$ OMP THREADPRIVATE(/rowmap0/,/rowmap1/,/rowmap2 /)
+!$OMP THREADPRIVATE(/rowmap0/,/rowmap1/,/rowmap2 /)
 
    mx=70
    if (iwork(3).gt.19) mx=iwork(3)
@@ -460,7 +460,7 @@ subroutine rowmapc(n,f,t,u,tend,hs,rtol,atol,jacv,fdt,solout,&
 !     "unorm" is used in subroutine "ROWDQ".
    common /rownorm/unorm
 
-!$ OMP THREADPRIVATE(/rowmap0/,/rowmap1/,/rowmap2 /,/rownorm/)
+!$OMP THREADPRIVATE(/rowmap0/,/rowmap1/,/rowmap2 /,/rownorm/)
 
 !
 ! Initializations.
@@ -733,7 +733,7 @@ subroutine stage(q,h,rhs,l,kl,asv,mk,mx,n,fm,fu0,u,t,st,ktol1,&
    integer nfeval,nsteps,nstepsr,nfdt,njacv,nkrydim(4,3)
    common /rowmap1/nfeval,nsteps,nstepsr,nfdt,njacv,nkrydim
 
-!$ OMP THREADPRIVATE(/rowmap0/,/rowmap1/)
+!$OMP THREADPRIVATE(/rowmap0/,/rowmap1/)
 
    ikrdim=2*(method/6)+ifcn+1
    info=0
@@ -871,7 +871,7 @@ subroutine kryarn(n,t,u,mk,m,kl,q,h,mx,ehg,l,fm,fu0,f,&
    DOUBLE PRECISION  rpar(*)
    external f,jacv
 
-!$ OMP THREADPRIVATE(/rowmap0/,/rowmap1/)
+!$OMP THREADPRIVATE(/rowmap0/,/rowmap1/)
 
 
    if (m.gt.mk) call reortn(n,m,kl,q,h,mx)
@@ -999,7 +999,7 @@ subroutine rowdq(n,t,u,y,fu0,fm,v,f,rpar,ipar)
    external f
    common /rownorm/ unorm
 
-!$ OMP THREADPRIVATE(/rownorm/)
+!$OMP THREADPRIVATE(/rownorm/)
 
    delta=1.d-7*dmax1(1d-5,unorm)
    eddelta=1d0/delta

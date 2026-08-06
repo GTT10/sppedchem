@@ -52,6 +52,7 @@
 subroutine SCbroadcast
 
    use sparse_mpi
+   use chemistry_string_limits, only: species_name_len
    use chemistry_setup
    use speedchem
    use sparse_chemistry
@@ -157,7 +158,7 @@ subroutine SCbroadcast
    call mpi_broadcast(nTHREE)
    call mpi_broadcast(nTB)
 
-   call mpi_broadcast(18,specie)
+   call mpi_broadcast(species_name_len,specie)
    call mpi_broadcast(2 ,elementi)
 
    call mpi_broadcast(sparse_jac)
@@ -280,6 +281,23 @@ subroutine SCbroadcast
    call mpi_broadcast(Troereac)
    call mpi_broadcast(Revreac )
 
+!  PLOG (cklink v2): per-reaction rate-form tag plus
+!  the packed pressure-dependent-Arrhenius arrays. Scalars first so
+!  workers know the sizes; the array broadcasts preserve lbounds, so the
+!  0-based *_ptr arrays keep their CSR indexing. A no-PLOG mechanism
+!  broadcasts empty/zero data and never uses it.
+   call mpi_broadcast(rate_form)
+   call mpi_broadcast(n_plog_reactions)
+   call mpi_broadcast(n_plog_nodes)
+   call mpi_broadcast(n_plog_terms)
+   call mpi_broadcast(plog_reaction)
+   call mpi_broadcast(plog_node_ptr)
+   call mpi_broadcast(plog_term_ptr)
+   call mpi_broadcast(plog_logP)
+   call mpi_broadcast(plog_A)
+   call mpi_broadcast(plog_b)
+   call mpi_broadcast(plog_EoverR)
+
 
    call mpi_broadcast(ip)
    call mpi_broadcast(jp)
@@ -388,5 +406,3 @@ subroutine SCbroadcast
 
 !     *****************************************************************
 end subroutine SCbroadcast
-
-

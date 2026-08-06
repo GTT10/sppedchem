@@ -16,7 +16,7 @@ SUBROUTINE DECLU(R,JF0,H,LDJAC,LU,LDLU,IPIV,ORD,IER,IJOB)
 !   COMMON
 !------------------------------------
    COMMON/LINAL/MLLU,MULU,MDIAG
-!$ OMP THREADPRIVATE(/LINAL/)
+!$OMP THREADPRIVATE(/LINAL/)
 !
 !   INPUT VARIABLES
 !------------------------------------
@@ -93,7 +93,7 @@ SUBROUTINE SOLLU(R,LU,LDLU,F,IPIV,IJOB)
 !   COMMON
 !------------------------------------
    COMMON/LINAL/MLLU,MULU,MDIAG
-!$ OMP THREADPRIVATE(/LINAL/)
+!$OMP THREADPRIVATE(/LINAL/)
 !
 !   INPUT VARIABLES
 !------------------------------------

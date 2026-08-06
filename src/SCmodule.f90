@@ -132,8 +132,8 @@ contains
       implicit none
 
       logical :: present
-      integer :: idummy
-      character(len=15) :: tmpsolver, programme
+      integer :: idummy, env_len, env_stat
+      character(len=15) :: tmpsolver, programme, env_solver
       character(len=*), parameter :: itapeTSS = "itapeTSS",&
       &itapeCH  = "itapeChem"
 
@@ -264,6 +264,18 @@ contains
          write(*,fmt_nofile)
       endif
 
+!      A process-local override is needed by regression harnesses and
+!      embedding applications that compare numerical and analytical
+!      Jacobian solvers without creating a cwd-global itapeChem file.
+!      Apply it before ODE workspace allocation.
+      call get_environment_variable('SC_SOLVER', env_solver, env_len, env_stat)
+      if (env_stat == 0 .and. env_len > 0) then
+         call s_cap(env_solver)
+         solver = trim(adjustl(env_solver))
+         analytical_jac = index(trim(solver), 'JAC') > 0
+         if (.not. analytical_jac) simplified_for_sparsity = .false.
+      endif
+
 !       ** Output solver setup data to screen **************************
 
       write(*,fmt_prog  )programme
@@ -371,21 +383,21 @@ module sparse_chemistry
 !         type(sparse)            :: ijac_sparse
    type(sparse), target    :: JAC_sparse
    type(sparse)            :: JACT_sparse
-!$ OMP THREADPRIVATE(JAC_SPARSE,JACT_sparse)
+!$OMP THREADPRIVATE(JAC_SPARSE,JACT_sparse)
 
 !        Species vs species subpart of the jacobian matrix
 !        JACYY(:,:) = JAC(2:neq, 2:neq); JACYYT = transpose(JACYY)
    type(sparse)    :: JACYY_sparse, JACYYT_sparse
-!$ OMP THREADPRIVATE(JACYY_sparse,JACYYT_sparse)
+!$OMP THREADPRIVATE(JACYY_sparse,JACYYT_sparse)
 
 !        Premultiplied nudiff * molar volume = nudiff * MW / rho
    type(sparse)    :: nudiffT_molarv_sparse
-!$ OMP THREADPRIVATE(nudiffT_molarv_sparse)
+!$OMP THREADPRIVATE(nudiffT_molarv_sparse)
 
 !        Derivative of reaction progress variable with respect to
 !        species mass fractions dq_dY [nr x ns]
    type(sparse)    :: dq_dY_sparse, dq_dY_T_sparse
-!$ OMP THREADPRIVATE(dq_dY_sparse, dq_dY_T_sparse)
+!$OMP THREADPRIVATE(dq_dY_sparse, dq_dY_T_sparse)
 
 !        Third-body enhanced molecularity coefficients [ntbALL x ns]
    type(sparse)    :: third_body_sp
@@ -402,13 +414,13 @@ contains
    !   **   Last update: wednesday, 23/11/2011                **
    !   *********************************************************
 
-   subroutine sparse_chemistry_setup(inotrev,nnotrev,Ainf)
+   subroutine sparse_chemistry_setup(inotrev,nnotrev,forward_active)
 
       implicit none
 
       integer, dimension(:), intent(in) :: inotrev
       integer, intent(in) :: nnotrev
-      real (dp)       , dimension(:), intent(in) :: Ainf
+      logical, dimension(:), intent(in) :: forward_active
 
       integer :: i
 
@@ -435,7 +447,7 @@ contains
       ! reaction rate constant
       stoich_r_eff_sp = stoich_r_sp
       do i = 1, stoich_r_sp%nr
-         if (Ainf(i)==0.e0_dp)call remove_line(stoich_r_eff_sp,i)
+         if (.not. forward_active(i)) call remove_line(stoich_r_eff_sp,i)
       end do
 
       istoich_r_eff_sp = stoich_r_eff_sp
@@ -510,6 +522,7 @@ end module sparse_chemistry
 module speedchem
 
    use working_precision, only: dp
+   use chemistry_string_limits, only: species_name_len
    implicit none
    public
 
@@ -581,7 +594,7 @@ module speedchem
    integer                            :: nTHREE, nTB
 
 !     ** character strings for elements and species
-   character(len=18), dimension(:), allocatable :: specie
+   character(len=species_name_len), dimension(:), allocatable :: specie
    character(len=2) , dimension(:), allocatable :: elementi
 
 !     ** Storage of chemistry jacobian sparsity ************************
@@ -593,7 +606,7 @@ module speedchem
 !      integer, dimension(:,:), allocatable :: ijac, ijacYY
    logical, dimension(:,:), allocatable :: ljac
    integer, dimension(:),   allocatable :: rowjac, coljac
-!$ OMP THREADPRIVATE(sparse_jac,njac, rowjac, coljac, ljac)
+!$OMP THREADPRIVATE(sparse_jac,njac, rowjac, coljac, ljac)
 
 !     ** Index of the oxidizer within the species array
    integer :: iO2
@@ -1346,7 +1359,7 @@ module find_mod
    integer, allocatable, public :: i2D1(:),i2D2(:)
 
 
-!$ OMP THREADPRIVATE(indices,i2D1,i2D2)
+!$OMP THREADPRIVATE(indices,i2D1,i2D2)
 contains
 
    subroutine find_indices(mask)
@@ -3011,9 +3024,9 @@ module SCmixturethermo
    public
 
    real (dp)        :: MWm, Rm, cp, cv, h, e
-!$ OMP THREADPRIVATE(cp,cv)
+!$OMP THREADPRIVATE(cp,cv)
    real (dp)       , target :: SCP, SCrho
-!$ OMP THREADPRIVATE(SCP,SCrho)
+!$OMP THREADPRIVATE(SCP,SCrho)
 
 
 contains
@@ -3673,6 +3686,55 @@ module reacpar
    &Troereac,&
    &Revreac
 
+!        RATE-FORM CLASSIFICATION *************************************
+!        Per-reaction rate-form tag (cklink v2, stage 1 PLOG plumbing).
+!        rate_form(nr) classifies how each reaction's forward rate
+!        constant is evaluated. Legacy forms keep their existing code
+!        paths (Arrhreac/Lindreac/Troereac); the tag lets new evaluators
+!        (PLOG now, CHEB later) coexist without touching those paths.
+!        A mechanism with no PLOG reactions leaves every entry at
+!        RATE_ARRHENIUS/THREE_BODY/... exactly as before, so the
+!        numeric path is unchanged (PRF stays bit-identical).
+   integer, parameter :: RATE_ARRHENIUS  = 0
+   integer, parameter :: RATE_THREE_BODY = 1
+   integer, parameter :: RATE_LINDEMANN  = 2
+   integer, parameter :: RATE_TROE       = 3
+   integer, parameter :: RATE_PLOG       = 4
+   integer, parameter :: RATE_CHEB       = 5   ! reserved, not yet evaluated
+   integer, dimension(:), allocatable :: rate_form
+
+!        PLOG (pressure-dependent Arrhenius) ***************************
+!        Packed, pointer-indexed storage (NOT a fixed MAXPLOG x IDIM
+!        array — see plan.md "推奨する内部データ構造"). Two levels of
+!        CSR-style pointers:
+!          reaction  -> range of pressure nodes  (plog_node_ptr)
+!          node      -> range of Arrhenius terms (plog_term_ptr)
+!        cklink v2 stores one entry per Arrhenius term. Adjacent entries
+!        with equal pressure form a node; their rates are summed before
+!        pressure interpolation (standard CHEMKIN/Cantera semantics).
+!        Units (deliberately NEW, to avoid disturbing legacy Ainf/binf/
+!        Einf units and PRF bit-identity):
+!          plog_logP     = log(P[Pa])         (input atm -> Pa -> ln)
+!          plog_A        = pre-exponential in SpeedCHEM internal units
+!          plog_b        = temperature exponent
+!          plog_EoverR   = E/R [K]
+   integer                                       :: n_plog_reactions = 0
+   integer                                       :: n_plog_nodes     = 0
+   integer                                       :: n_plog_terms     = 0
+!        plog_reaction(1:n_plog_reactions): global reaction index of each
+!        PLOG reaction (ascending). plog_node_ptr(0:n_plog_reactions):
+!        node range [ptr(r-1)+1 : ptr(r)] for the r-th PLOG reaction.
+   integer, dimension(:), allocatable            :: plog_reaction
+   integer, dimension(:), allocatable            :: plog_node_ptr
+!        plog_logP(1:n_plog_nodes): ln(P[Pa]) per node (ascending within
+!        a reaction). plog_term_ptr(0:n_plog_nodes): term range per node.
+   real (dp)       , dimension(:), allocatable   :: plog_logP
+   integer, dimension(:), allocatable            :: plog_term_ptr
+!        Arrhenius terms, one set per entry.
+   real (dp)       , dimension(:), allocatable   :: plog_A
+   real (dp)       , dimension(:), allocatable   :: plog_b
+   real (dp)       , dimension(:), allocatable   :: plog_EoverR
+
 !        Storage of equilibrium constants
    real (dp)       , parameter     :: uKc_RTOL=1e-15_dp
    real (dp)       , dimension(:), allocatable   :: store_uKc
@@ -3680,6 +3742,216 @@ module reacpar
 
 
 contains
+
+!        ***************************************************************
+!        ** PLOG (cklink v2) test/inspection helpers                  **
+!        ***************************************************************
+
+!        plog_dump_canonical(unit): write the loaded PLOG packed arrays
+!        as canonical text to `unit` (a stable, diff-able format for the
+!        round-trip test: parse -> write cklink -> read -> dump). One
+!        line per node: reaction index, node index within reaction,
+!        ln(P[Pa]), A, b, E/R[K]. Units are exactly the on-disk units.
+   subroutine plog_dump_canonical(unit)
+      implicit none
+      integer, intent(in) :: unit
+      integer :: r, k, node
+      write(unit,'(A)') '# PLOG canonical dump (cklink v2)'
+      write(unit,'(A,I0)') 'n_plog_reactions ', n_plog_reactions
+      write(unit,'(A,I0)') 'n_plog_nodes ', n_plog_nodes
+      if (n_plog_reactions <= 0) return
+      do r = 1, n_plog_reactions
+         do node = plog_node_ptr(r-1)+1, plog_node_ptr(r)
+            k = node - plog_node_ptr(r-1)
+            write(unit,'(I0,1X,I0,3(1X,ES23.15E3),1X,ES23.15E3)')     &
+               plog_reaction(r), k, plog_logP(node), plog_A(node),    &
+               plog_b(node), plog_EoverR(node)
+         end do
+      end do
+   end subroutine plog_dump_canonical
+
+!        ***************************************************************
+!        ** PLOG forward rate constant (stage 2)                      **
+!        ***************************************************************
+!        plog_kinf_eval: overwrite kinf(r) for every PLOG reaction r
+!        with the pressure-interpolated forward rate constant at the
+!        current temperature T = Ta(1) and pressure P_pa [Pa]. Optional
+!        outputs provide the exact constant-volume derivatives needed by
+!        the analytic Jacobian:
+!          dkinfdT(r)      = dk/dT at fixed rho,Y
+!          dlnk_dlnP(r)    = dln(k)/dln(P)
+!        Arrays are indexed by the global reaction number. Only PLOG
+!        entries are overwritten; callers retain legacy derivatives for
+!        every other rate form.
+!
+!        Per-node rate:  k_i(T) = A_i * T**b_i * exp(-(E/R)_i / T)
+!                                = A_i * exp(b_i*ln T - (E/R)_i / T)
+!        (units: A_i is the interpreter's pre-exponential, identical to
+!         Ainf, so k_i lands in the same cm-mol-s units as kinf; E/R is
+!         already in K, so no Rcal factor is needed here.)
+!
+!        At a pressure node with multiple entries, k_i and dk_i/dT are
+!        sums over all Arrhenius terms at that pressure. Interpolation
+!        is then log-linear in ln P:
+!          lnP <= lnP_1        -> k = k_1                 (nearest end)
+!          lnP >= lnP_last     -> k = k_last              (nearest end)
+!          lnP_j <= lnP < lnP_{j+1}:
+!             theta = (lnP - lnP_j)/(lnP_{j+1} - lnP_j)
+!             ln k  = (1-theta) ln k_j + theta ln k_{j+1}
+!        A single-node PLOG reaction is just k_1 at all pressures.
+!        This routine only reads the packed arrays, so it is safe to
+!        call with n_plog_reactions == 0 (does nothing).
+   subroutine plog_kinf_eval(Ta, P_pa, kinf, dkinfdT, dlnk_dlnP)
+      use working_precision, only: dp
+      implicit none
+      real (dp), dimension(6), intent(in)    :: Ta   ! [T, T2, T3, T4, 1/T, lnT]
+      real (dp),               intent(in)    :: P_pa ! current pressure [Pa]
+      real (dp), dimension(:), intent(inout) :: kinf ! rate constants (nr)
+      real (dp), dimension(:), intent(inout), optional :: dkinfdT
+      real (dp), dimension(:), intent(inout), optional :: dlnk_dlnP
+      integer :: r, ir, j0, j1, nlo, nhi, node, node_end, last_node
+      real (dp) :: lnP, lnT, uT, theta, lnk, lnk0, lnk1,            &
+                   g, g0, g1, slope
+
+      if (n_plog_reactions <= 0) return
+
+      lnT = Ta(6)
+      uT  = Ta(5)
+!     Guard against a non-positive pressure (should not happen for a
+!     physical state); fall back to the lowest node by using a very
+!     small ln P.
+      if (P_pa > 0.0_dp) then
+         lnP = log(P_pa)
+      else
+         lnP = -huge(1.0_dp)
+      endif
+
+      do r = 1, n_plog_reactions
+         ir  = plog_reaction(r)
+         nlo = plog_node_ptr(r-1) + 1   ! first node of reaction r
+         nhi = plog_node_ptr(r)         ! last  node of reaction r
+         node_end = plog_group_end(nlo, nhi)
+         last_node = nlo
+         do while (plog_group_end(last_node, nhi) < nhi)
+            last_node = plog_group_end(last_node, nhi) + 1
+         enddo
+
+         slope = 0.0_dp
+         if (node_end >= nhi) then
+!           Single pressure node: pressure-independent Arrhenius at k_1.
+            call plog_group_lnk_dlnkdT(nlo, node_end, lnT, uT, lnk, g)
+
+         else if (lnP < plog_logP(nlo)) then
+!           Below the lowest node -> nearest endpoint (s = 0). Equality
+!           uses the first interval, matching the right-continuous
+!           convention used at every interior node.
+            call plog_group_lnk_dlnkdT(nlo, node_end, lnT, uT, lnk, g)
+
+         else if (lnP >= plog_logP(last_node)) then
+!           At or above the highest node -> nearest endpoint (s = 0).
+            call plog_group_lnk_dlnkdT(last_node, nhi, lnT, uT, lnk, g)
+
+         else
+!           Locate the bracketing interval [j0, j1] with
+!           logP(j0) <= lnP < logP(j1). Right-continuous at a node:
+!           when lnP == logP(node) exactly, the loop stops with j0=node.
+            j0 = nlo
+            do
+               node_end = plog_group_end(j0, nhi)
+               j1 = node_end + 1
+               if (lnP >= plog_logP(j0) .and. lnP < plog_logP(j1)) then
+                  exit
+               endif
+               j0 = j1
+            enddo
+
+            call plog_group_lnk_dlnkdT(j0, node_end, lnT, uT, lnk0, g0)
+            call plog_group_lnk_dlnkdT(j1, plog_group_end(j1, nhi),   &
+                                       lnT, uT, lnk1, g1)
+            theta = (lnP - plog_logP(j0)) /                            &
+                    (plog_logP(j1) - plog_logP(j0))
+            lnk   = (1.0_dp - theta)*lnk0 + theta*lnk1
+            slope = (lnk1 - lnk0) /                                    &
+                    (plog_logP(j1) - plog_logP(j0))
+!           At fixed P, theta is constant. At fixed rho,Y, however,
+!           dlnP/dT=1/T, hence the additional slope/T chain-rule term.
+            g = (1.0_dp - theta)*g0 + theta*g1 + slope*uT
+         endif
+
+         kinf(ir) = exp(lnk)
+         if (present(dkinfdT))   dkinfdT(ir)   = kinf(ir)*g
+         if (present(dlnk_dlnP)) dlnk_dlnP(ir) = slope
+      end do
+   end subroutine plog_kinf_eval
+
+!        Return the final entry of the pressure group beginning at
+!        `first`. The tolerance matches parse/read validation.
+   integer function plog_group_end(first, last) result(group_last)
+      use working_precision, only: dp
+      implicit none
+      integer, intent(in) :: first, last
+      real (dp), parameter :: logp_tol = 1.0e-9_dp
+      group_last = first
+      do while (group_last < last)
+         if (abs(plog_logP(group_last+1) - plog_logP(first)) > logp_tol) exit
+         group_last = group_last + 1
+      enddo
+   end function plog_group_end
+
+!        Stable log-sum-exp evaluation for all Arrhenius terms at one
+!        pressure, plus the exact temperature derivative of ln(sum k).
+   subroutine plog_group_lnk_dlnkdT(first, last, lnT, uT, lnk, g)
+      use working_precision, only: dp
+      implicit none
+      integer,   intent(in)  :: first, last
+      real (dp), intent(in)  :: lnT, uT
+      real (dp), intent(out) :: lnk, g
+      integer :: term
+      real (dp) :: lnk_max, weight, weight_sum, g_sum
+
+      lnk_max = plog_node_lnk(first, lnT, uT)
+      do term = first + 1, last
+         lnk_max = max(lnk_max, plog_node_lnk(term, lnT, uT))
+      enddo
+      weight_sum = 0.0_dp
+      g_sum = 0.0_dp
+      do term = first, last
+         weight = exp(plog_node_lnk(term, lnT, uT) - lnk_max)
+         weight_sum = weight_sum + weight
+         g_sum = g_sum + weight*plog_node_dlnkdT(term, uT)
+      enddo
+      lnk = lnk_max + log(weight_sum)
+      g = g_sum/weight_sum
+   end subroutine plog_group_lnk_dlnkdT
+
+!        Logarithmic node rate avoids underflow before interpolation.
+   real (dp) function plog_node_lnk(node, lnT, uT)
+      use working_precision, only: dp
+      implicit none
+      integer,   intent(in) :: node
+      real (dp), intent(in) :: lnT, uT
+      plog_node_lnk = log(plog_A(node)) + plog_b(node)*lnT -          &
+                      plog_EoverR(node)*uT
+   end function plog_node_lnk
+
+!        Temperature derivative of ln(k_node) at fixed pressure:
+!        b/T + (E/R)/T**2.
+   real (dp) function plog_node_dlnkdT(node, uT)
+      use working_precision, only: dp
+      implicit none
+      integer,   intent(in) :: node
+      real (dp), intent(in) :: uT
+      plog_node_dlnkdT = plog_b(node)*uT + plog_EoverR(node)*uT*uT
+   end function plog_node_dlnkdT
+
+!        Retained as a public convenience for tests/inspection.
+   real (dp) function plog_node_rate(node, lnT, uT)
+      use working_precision, only: dp
+      implicit none
+      integer,   intent(in) :: node
+      real (dp), intent(in) :: lnT, uT
+      plog_node_rate = exp(plog_node_lnk(node, lnT, uT))
+   end function plog_node_rate
 
 !        ***************************************************************
 !        ** Allocate and compute packed reaction indices              **
@@ -3696,6 +3968,7 @@ contains
       &third_body_sp
       use sparse_algebra, only:sparse, dense_to_sparse, sparse_value,&
       &sparse_row_prod, sparse_internal_count
+      use sparse_definitions, only: allocate
 
       implicit none
 
@@ -3705,36 +3978,32 @@ contains
       integer, dimension(nTHREE) :: count_tb
 
 
-!        Count number of species involved in three body reactions
-      call sparse_internal_count(tb_beta_sp, count_tb, dim=2)
+!        Count/pack species involved in third-body reactions. A
+!        zero-third-body mechanism is valid (and common for focused
+!        PLOG tests), so avoid MAXVAL and sparse assignment on empties.
+      if (nTHREE > 0) then
+         call sparse_internal_count(tb_beta_sp, count_tb, dim=2)
+         nmax = maxval(count_tb)
+         allocate(n_tb_beta(nTHREE), tb_beta_pack(nmax,nTHREE),       &
+                  is_beta_pack(nmax,nTHREE))
 
-!        Allocate number of species with beta /= 0 in each tb reaction
-      nmax = maxval(count_tb)
-      allocate(n_tb_beta   (nTHREE),&
-      &tb_beta_pack(nmax, nTHREE), is_beta_pack(nmax,nTHREE))
-
-
-
-      do i = 1, nTHREE
-
-         ir = iTHREE(i)
-
-         n_tb_beta(i) = count_tb(i)
-
-         if (n_tb_beta(i) > 0) then
-
-            tb_beta_pack(1:n_tb_beta(i),i) =&
-            &tb_beta_sp% A(tb_beta_sp%IA(i):tb_beta_sp%IA(i+1)-1)
-
-            is_beta_pack(1:n_tb_beta(i),i) =&
-            &tb_beta_sp%JA(tb_beta_sp%IA(i):tb_beta_sp%IA(i+1)-1)
-
-         endif
-
-      end do
+         do i = 1, nTHREE
+            ir = iTHREE(i)
+            n_tb_beta(i) = count_tb(i)
+            if (n_tb_beta(i) > 0) then
+               tb_beta_pack(1:n_tb_beta(i),i) =                       &
+                  tb_beta_sp%A(tb_beta_sp%IA(i):tb_beta_sp%IA(i+1)-1)
+               is_beta_pack(1:n_tb_beta(i),i) =                       &
+                  tb_beta_sp%JA(tb_beta_sp%IA(i):tb_beta_sp%IA(i+1)-1)
+            endif
+         enddo
 
 !        Initialise third body coefficients divided by molecular weights
-      tbb_uMW_sp =  sparse_row_prod(tb_beta_sp, uMW)
+         tbb_uMW_sp = sparse_row_prod(tb_beta_sp, uMW)
+      else
+         allocate(n_tb_beta(0), tb_beta_pack(0,0), is_beta_pack(0,0))
+         call allocate(0, ns, 0, tbb_uMW_sp)
+      endif
 
 
 
@@ -4089,7 +4358,7 @@ module kinetics_mod
 !     Arrays for saved data for the Jacobian matrix
    real (dp)       , dimension(:), allocatable :: save_k0, save_kinf
    logical                                     :: lsavek = .false.
-!$ OMP THREADPRIVATE(save_k0, save_kinf, lsavek)
+!$OMP THREADPRIVATE(save_k0, save_kinf, lsavek)
 
 
 !     Array for storing species rates of change
@@ -4098,13 +4367,21 @@ module kinetics_mod
    real (dp)         :: store_dwdt_T = 0.e0_dp
 
 !     Array for storing reaction rate constants
+!     store_kinf_T seeds to an impossible temperature so the first
+!     retrieve_kinf call never matches uninitialised storage. (These
+!     retrieve_* caches are currently dormant — no active callers — but
+!     the guard keeps them safe if re-enabled.)
    real (dp)       , dimension(:), allocatable :: store_kinf
-   real (dp)                                   :: store_kinf_T
+   real (dp)                                   :: store_kinf_T = -1.0_dp
 
 !     Array for storing mass action productories
    real (dp)       , dimension(:), allocatable, target :: store_qf,&
    &store_qb
    real (dp)       , dimension(:), allocatable :: store_C
+!     True only once store_C/qf/qb hold a real evaluation. Guards against
+!     comparing against just-allocated (uninitialised) storage on the first
+!     call, which could spuriously report a cache hit and return garbage.
+   logical                                     :: store_valid = .false.
 
 
 contains
@@ -4571,7 +4848,8 @@ contains
       use reacpar,             only: troereac, Lindreac, uequilC,&
       &n_tb_beta,tb_beta_pack,&
       &nEQREV,iEQREV,nXREV,iXREV,&
-      &is_beta_pack
+      &is_beta_pack,&
+      &n_plog_reactions, plog_kinf_eval
       use SCmixturethermo,     only: SCP, SCrho
       use SCthermodata,        only: interp4_coefs, use_table
       use sparse_chemistry,    only: nudiffT_sparse, tb_beta_sp,&
@@ -4643,6 +4921,15 @@ contains
          if (ntbTROE>0)log10Fcent = troe_logfac(Ta,iT,frac)
       endif
 
+!     ** PLOG (pressure-dependent Arrhenius) forward rates ************
+!     Override kinf(r) for each PLOG reaction with the pressure-
+!     interpolated value at the current state pressure SCP [Pa]. This
+!     is a no-op when the mechanism has no PLOG reactions, so non-PLOG
+!     mechanisms are numerically unchanged. PLOG reactions carry no
+!     falloff data, so overriding kinf here (before kf and the falloff
+!     Pr terms) is safe. (stage 2)
+      if (n_plog_reactions>0) call plog_kinf_eval(Ta, SCP, kinf)
+
 !     ** Compute forward reaction rates *******************************
       kf = kinf
 
@@ -4702,10 +4989,12 @@ contains
 !     Computing reaction rate constants according to Troe's formulation
       troefactors: if (ntbTROE > 0) then
 
-         Pr2 = Pr(iTROEitbFALL)
+         Pr2 = max(Pr(iTROEitbFALL), sqrt(tiny(one)))
 
 !        ** Computing troe centering factor
-         log10Pr    = log10(Pr2/(one-Pr2))
+!        Species-specific collider channels can have M=0 and therefore
+!        Pr=0. Evaluate the Pr->0 limit without log10(0) or Inf/Inf.
+         log10Pr = log10(Pr2) - log10(max(one-Pr2, tiny(one)))
 
 !        ** Troe model parameters
          ctroe = -0.40_dp - 0.67_dp * log10Fcent
@@ -4807,14 +5096,25 @@ contains
          if (.not.allocated(store_qf))allocate(store_qf(nr))
          if (.not.allocated(store_qb))allocate(store_qb(nr))
 
-         out_of_tolerance = .false.
-
-         check_tolerance: do i = 1, ns
-            if (abs(1.e0_dp - C(i)*store_C(i)) > micro) then
-               out_of_tolerance = .true.
-               exit check_tolerance
-            endif
-         end do check_tolerance
+!        Force a full evaluation until the store holds real data. Without
+!        this, the first call compares C against uninitialised store_C and
+!        could report a spurious hit, returning uninitialised store_qf/qb.
+         if (.not. store_valid) then
+            out_of_tolerance = .true.
+         else
+            out_of_tolerance = .false.
+            check_tolerance: do i = 1, ns
+!              store_C holds 1/C_prev, so C(i)*store_C(i) ~ C/C_prev. NB a
+!              previous zero concentration stored Inf here; C*Inf feeds a
+!              NaN which fails this test (NaN>micro is .false.) and would
+!              wrongly reuse the cache. The store_valid guard covers the
+!              first call; a fuller fix would store C (not 1/C) directly.
+               if (abs(1.e0_dp - C(i)*store_C(i)) > micro) then
+                  out_of_tolerance = .true.
+                  exit check_tolerance
+               endif
+            end do check_tolerance
+         endif
 
       else
 
@@ -4864,6 +5164,7 @@ contains
             store_C  = one/C
             store_qf = qf
             store_qb = qb
+            store_valid = .true.
          endif
 
       else
@@ -5065,20 +5366,20 @@ module ode_solver
 
 !       Array length parameters
    integer :: lrw, liw
-!OMP    THREADPRIVATE(lrw,liw)
+!$OMP   THREADPRIVATE(lrw,liw)
 
 !       Integration method parameters and option switches
    integer :: method, itol, iopt, itask, istate, ijac, imas, iout,&
    &ifcn, idfx, mumas, mlmas, mujac, mljac, maxk
-!$ OMP   THREADPRIVATE(method,itol,iopt,itask,istate,ijac,imas,iout,ifcn,
-!$ OMP&  idfx,mumas,mlmas,mujac,mljac,maxk)
+!$OMP   THREADPRIVATE(method,itol,iopt,itask,istate,ijac,imas,iout,ifcn,&
+!$OMP&  idfx,mumas,mlmas,mujac,mljac,maxk)
 
 !       Runtime parameters
    integer :: maxnsteps
    real (dp)                                   :: hs
    real (dp)                                   :: rtol
    real (dp)       , dimension(:), allocatable :: atol
-!$ OMP   THREADPRIVATE(maxnsteps, hs, rtol, atol)
+!$OMP   THREADPRIVATE(maxnsteps, hs, rtol, atol)
 
 
 !       Fortran 90 implementation of VODE related data
@@ -5086,12 +5387,12 @@ module ode_solver
    integer,          dimension(31) :: istats
    double precision, dimension(22) :: rstats
    integer                         :: nIA, nJA, nPD, nVF90JAC
-!$ OMP   THREADPRIVATE(vf90_opts,istats,rstats,nIA,nJA,nPD,nVF90JAC)
+!$OMP   THREADPRIVATE(vf90_opts,istats,rstats,nIA,nJA,nPD,nVF90JAC)
 
 !       Working arrays
    real (dp)       , dimension(:), allocatable :: rwork
    integer,          dimension(:), allocatable :: iwork
-!$ OMP   THREADPRIVATE(rwork,iwork)
+!$OMP   THREADPRIVATE(rwork,iwork)
 
 !       Working arrays for RADAU5 sparse matrices storage
    integer,          dimension(:), allocatable :: iper1, iiper1
@@ -5106,12 +5407,12 @@ module ode_solver
    type(sparse)         :: JACT_VF90
    type(sparse_ordered) :: R5_sys1, R5_sys2, DASPK_sys
 
-!$ OMP   THREADPRIVATE(iper1,iiper1,iper2,iiper2,iLU1,iLU2,rLU1,rLU2,
-!$ OMP&                liLU1,lrLU1,liLU2,lrLU2,strg1,strg2)
+!$OMP   THREADPRIVATE(iper1,iiper1,iper2,iiper2,iLU1,iLU2,rLU1,rLU2,&
+!$OMP&                liLU1,lrLU1,liLU2,lrLU2,strg1,strg2)
 
 !       Option array for DASPK ode solver
    integer,          dimension(20)             :: daspkinfo
-!$ OMP   THREADPRIVATE(daspkinfo)
+!$OMP   THREADPRIVATE(daspkinfo)
 
 !       --- Integration monitoring arrays ---
 !       Calls to the ODE and to the jacobian routine

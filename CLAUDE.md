@@ -22,7 +22,7 @@ An `fpm.toml` exists but the Makefile/scripts are the canonical build. `fpm` is 
 
 ## Testing
 
-There is one end-to-end smoke test that drives the whole pipeline and gates on the result. Since the repo is a library with no main program, the test provides its own driver.
+The primary end-to-end smoke test drives the whole pipeline and gates on the result. Since the repo is a library with no main program, the test provides its own driver.
 
 ```bash
 scripts/run_tests.sh                             # build + smoke test (test/data/)
@@ -34,6 +34,36 @@ SC_MECHDIR=/path/to/data/ scripts/run_tests.sh   # run against a different mecha
 What the driver does: sets `mechdir`, calls `chemistry_input` (the full setup orchestrator: CKINTP → cklink → SCcklink → sparse setup → `ODE_solver_speedchem_init`), seeds a **hot stoichiometric n-hexadecane/air state** (looked up by species name via the public `specie`/`ns` from `speedchem`), integrates constant-volume with `chemistry_ODE_integrate`, and asserts the solution is finite **and the temperature rose >100 K (autoignition)**. Baseline: the bundled mechanism links to 51 species / 153 reactions and ignites 1400 K → ~1798 K.
 
 Test mechanism lives in [test/data/](test/data/) (`chem.inp` = a 51-species PRF n-hexadecane/iso-cetane skeletal mechanism, `therm.dat`). Only those two inputs are tracked; the run writes `cklink`, `SpeedCHEM.out`, `chem.out`, `dat.*` etc. into that dir and they are gitignored. Use this test as the regression gate for any refactor.
+
+### Negative tests (fail-closed guards)
+
+`scripts/run_neg_tests.sh` is the complement to `run_tests.sh`: it checks that mechanisms using reaction features SpeedCHEM **cannot** evaluate are *refused* (fail-closed), not silently mis-integrated. PLOG negative cases cover out-of-order pressure, non-positive A, explicit `REV`, and third-body/falloff combinations. A negative case passes only when the driver exits non-zero and emits the expected diagnostic.
+
+### PLOG support + cklink v2
+
+PLOG (`PLOG / P A b E /`) is supported end to end: parse, cklink v2 round-trip, direct rate evaluation, constant-volume analytic Jacobian, default `LSODESJAC` integration, and MPI broadcast. `plog_collect` accumulates lines dynamically and applies the same activation-energy and `MOLECULES` A-factor conversions as ordinary Arrhenius rows. The supported dialect requires positive A and non-decreasing pressures. Adjacent entries at the same pressure are summed before pressure interpolation, matching CHEMKIN/Cantera grouped-term semantics. PLOG combined with explicit `REV`, third-body/falloff, `FORD/RORD`, or real stoichiometry is rejected.
+
+The linking file is now **cklink v2**: a leading `WRITE (LINC) CK_MAGIC, CK_SCHEMA` record (magic `'SCLKv2  '`, schema `3`) precedes the legacy `VERS,PREC,KERR` header, and a PLOG section (counts → CSR arrays → integer checksum) is appended after the reaction data. Schema 3 stores the standard full 18-character CHEMKIN/NASA-7 species field rather than the legacy 16-character field. `SCcklink` verifies the magic/schema (fail-closed on mismatch — this replaced the stage-0 `VERS`-string warning), then reads the PLOG section into the `reacpar` arrays and sets a per-reaction `rate_form` tag (`RATE_ARRHENIUS`/`RATE_PLOG`/…). **A mechanism with no PLOG writes a count-0 section and is byte-for-byte numerically identical downstream — the PRF baseline stays 1797.681 K.** Bumping the on-disk layout means bumping `CK_SCHEMA` in `chemkin_module.f90` and `CK_SCHEMA_EXPECT` in `SCcklink.f90` together.
+
+Mechanism text limits are centralized in `SCstring_limits.f90`: species identifiers use the NASA-7 columns 1:18 field, while reaction and auxiliary lines use 256-character parsing buffers. `CKTHRM` reads the fixed 18-column identifier directly, so an 18-character name remains valid even when the date field begins immediately in column 19. `CKREAC` uses the full mechanism-line length internally rather than truncating the compact reaction equation at 80 characters.
+
+Because SCcklink rejects every unsupported optional section (`FORD`/`JAN`/…) with `error stop` *before* the PLOG read, the reader can rely on the file being positioned exactly at the PLOG section after the REV/FAL/THB reads — so the trailing PLOG section is read by a plain forward read, no rewind/skip bookkeeping.
+
+`scripts/run_plog_tests.sh` checks the canonical cklink dump and `REACTIONS MOLECULES` conversion. Regenerate the golden only when the packed representation legitimately changes.
+
+### PLOG rate and analytic Jacobian
+
+PLOG **forward rate constants are evaluated** by `reacpar::plog_kinf_eval(Ta, P_pa, kinf)`, called from `mass_action` (in `SCmodule.f90`) right after the Arrhenius `kinf` is formed and before `kf = kinf`. For each PLOG reaction it overwrites `kinf(r)` with the pressure-interpolated value: per node `k_i = A_i·exp(b_i·lnT − (E/R)_i/T)` (units match `Ainf`; `E/R` is in K so no `Rcal`), then **log-linear interpolation of ln k in ln P** between the two bracketing pressure nodes, with **nearest-endpoint clamping** outside the node range (`s=0`). Pressure comes from `SCP` [Pa] (the current state pressure; PLOG nodes store `ln(P[Pa])`). A mechanism with no PLOG reactions never calls it, so non-PLOG numerics are unchanged (PRF stays 1797.681 K).
+
+`plog_kinf_eval` also returns `dk/dT` at fixed density/composition and `dln(k)/dln(P)`. `constV_jac_sparse` recomputes pressure from its input state and adds the resulting dense all-species coupling; PLOG automatically disables simplified sparsity. `scripts/run_plog_eval_tests.sh` checks closed-form rates/derivatives, byte-identical non-PLOG-equivalent RHS, every analytic Jacobian column against central differences, actual `LSODESJAC` integration, and two-rank MPI broadcast.
+
+### Reusing the library with another mechanism
+
+`chemistry_input` stores a loaded mechanism and its solver workspaces in module-global state. Call `chemistry_finalize` before loading another mechanism in the same process. It releases mechanism, thermo, kinetics, sparse-Jacobian, solver, CHEMKIN, and PLOG collector storage and is safe to call repeatedly.
+
+`scripts/run_reload_tests.sh` stages the bundled PRF and compact PLOG mechanisms and checks an A → finalize → B → finalize → A sequence with both `LSODESJAC` and pointer-owning `VODESJAC` setup. The reloaded A dimensions, RHS, and short integration must match the first load exactly, and a repeated finalization must leave all inspected state unallocated.
+
+`scripts/run_openmp_reload_tests.sh` performs the same lifecycle check with an isolated `-qopenmp -check bounds` build and two OpenMP threads. It does not overwrite the canonical `ifx/` build.
 
 ### Critical: compile order is fixed and must not change
 

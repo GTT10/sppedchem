@@ -49,7 +49,7 @@
       subroutine chemistry_ODE_integrate(neq,rtol,atol,t0,tf,yin)
 
       use working_precision,      only: dp
-      use speedchem,              only: nr, njac,                    &
+      use speedchem,              only: nr, njac, ns,                &
                                         species_permutations,        &
                                         species_inverse_permutations
       use ode_solver,             only: rwork, iwork, ncJAC, ncCONV, &
@@ -87,6 +87,10 @@
 
       real (dp), dimension(neq) :: yin0, yprime
       real (dp)                 :: rpar, rto2, h0, t00
+!     Saved initial time so a retry restarts from the original t0. Most
+!     solvers take t0 as intent(inout) and advance it, so without this the
+!     next attempt would integrate a shorter interval [advanced_t0, tf].
+      real (dp)                 :: t0_init
       integer                   :: ipar, it, ierr
 	  integer, parameter        :: nit = 5
 	  integer, dimension(20)    :: info
@@ -100,6 +104,19 @@
 	   fmt_time  = "(' Warning: integration time is not positive ')"
 
 
+
+!     State-vector contract check. The unknown array is
+!         yin(1)      = T [K]
+!         yin(2:neq)  = species mass fractions Y_1..Y_ns [-]   (NOT molar
+!                       concentrations; see SC_conV in SCconV.f90)
+!     so neq must be exactly ns+1. A mismatch means the caller sized the
+!     state wrong; integrating anyway would read/write out of bounds or
+!     silently drop a species, so refuse up front.
+      if (neq /= ns + 1) then
+         write(*,"(' ERROR chemistry_ODE_integrate: neq (',I0,') /= ns+1"//&
+                  " (',I0,'). The state must be [T, Y_1..Y_ns].')") neq, ns+1
+         error stop 1
+      endif
 
 !     Initialization
       istate = 1
@@ -119,6 +136,9 @@
          yin0          = yin
       endif
 
+!     Save the initial time so each retry can restart the interval from it
+      t0_init = t0
+
 	  it     = 0
 
 !     If the first integration fails, temperature tabulation is suppressed
@@ -129,6 +149,7 @@
 	  integration_attempts: do while (it < nit .and. istate<2)
 
 	     yin     = yin0
+		 t0      = t0_init
 		 it      = it + 1
 		 istate  = 1
 		 rto2    = rtol * ten**(it-1)
@@ -959,7 +980,8 @@
                                   accurate_scthermo,                      &
                                   check_reaction_mechanism,               &
 !ck2015                                  permutate_species
-                                  permutate_species, mechdir
+                                  permutate_species, mechdir,              &
+                                  simplified_for_sparsity
       use speedchem,        only: ns, nr, neq, scmechanism_to_file,       &
                                   init_stoich_indices,                    &
                                   scmechanism_to_chemkin,                 &
@@ -976,8 +998,9 @@
                                   check_janaf_polynomials
       use sparse_chemistry, only: permutate_sparse_matrices
       use SCmixturethermo,  only: SCP, SCrho
-      use reacpar,          only: init_reaction_indices, &
-                                  tabulate_equilibrium
+      use reacpar,          only: init_reaction_indices,                  &
+                                  tabulate_equilibrium, n_plog_reactions, &
+                                  plog_reaction
       use troepar,          only: init_thirdbody_indices, &
                                   tabulate_troepars
       use kinetics_mod,     only: tabulate_kinetics, permutate_kinetics
@@ -999,6 +1022,7 @@
       integer          :: i, j, dummynJ=0, dummyn1=0, dummyn2=0
       logical          :: present, present_CK1, present_CK2, present_CKascii,    &
                           present_CKtherm, ckinp_run = .false.
+      logical, dimension(:), allocatable :: forward_active
       real (dp), dimension(:)  , allocatable :: dummyy, dummydyindt
       real (dp), dimension(:,:), allocatable :: dummyjac
 
@@ -1069,13 +1093,26 @@
          call SCsetup
       endif
 
+!     PLOG pressure coupling is dense in species space. Keep the whole
+!     analytic Jacobian exact while PLOG is active; silently retaining
+!     the legacy simplified third-body pattern would make a finite-
+!     difference comparison ambiguous and can omit real couplings.
+      if (n_plog_reactions > 0 .and. simplified_for_sparsity) then
+         simplified_for_sparsity = .false.
+         write(*,"(' PLOG: using complete analytic Jacobian sparsity.')")
+      endif
+
 !     Initialize sparse chemistry algebra
 !      call init_stoich_indices
       call init_reaction_indices
       call init_thirdbody_indices
 !      if (accurate_scthermo) call store_thermo_coeffs
 !     Compute mechanism's sparse matrices
-      call sparse_chemistry_setup(inotrev,nnotrev,Ainf)
+      allocate(forward_active(nr))
+      forward_active = (Ainf /= 0.0_dp)
+      if (n_plog_reactions > 0) forward_active(plog_reaction) = .true.
+      call sparse_chemistry_setup(inotrev,nnotrev,forward_active)
+      deallocate(forward_active)
 
 !     Compute stoichiometry: species and element invariants
       call element_matrix
