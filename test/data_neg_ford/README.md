@@ -9,6 +9,10 @@ IC16H34+O2 = IC16H33+HO2 6.000E+13 0.00 46000.0
  FORD / IC16H34 0.5 /          <-- added
 ```
 
+## Provenance
+
+This is a locally modified negative-test fixture derived from the Fan–Jia–Chang–Xie PRF mechanism described in `test/data/README.md`, not an original author release. Its publication attribution and unresolved redistribution status are recorded there and in `THIRD_PARTY_NOTICES.md`. `therm.dat` is copied unchanged from `test/data/`.
+
 ## What it tests
 
 `FORD`/`RORD` (modified species order) is parsed by the CKINTP interpreter and

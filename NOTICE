@@ -1,0 +1,18 @@
+SpeedCHEM community-maintained source tree
+
+Original SpeedCHEM work:
+  Copyright (C) 2010-2013 Federico Perini
+  Original project: https://www.federicoperini.info/speedchem
+
+This repository contains modifications made by later contributors, including
+build-system modernization, regression infrastructure, mechanism-lifecycle
+support, extended CHEMKIN string handling, and PLOG support. The Git history
+records the dates and authorship of those modifications.
+
+SpeedCHEM-authored portions are available under GPL-3.0-or-later. The full
+license is in LICENSE. Imported numerical solvers and legacy interface code
+retain their own authorship and provenance notices; see THIRD_PARTY_NOTICES.md.
+
+This repository is not the official upstream SpeedCHEM distribution and does
+not imply endorsement by the original author or by the authors or institutions
+named in imported solver source files.
