@@ -58,6 +58,8 @@ Run all self-contained regression tests:
 make test-all
 ```
 
+The bundled ignition smoke test uses a locally adapted copy of the Fan–Jia–Chang–Xie n-hexadecane/iso-cetane skeletal PRF mechanism. Its publication attribution and unresolved redistribution status are documented in `THIRD_PARTY_NOTICES.md`; derived PLOG and negative-test fixtures share that provenance.
+
 Run the pinned public-mechanism comparison against Cantera:
 
 ```bash
@@ -106,7 +108,7 @@ Machine-readable citation metadata is provided in `CITATION.cff`.
 
 The SpeedCHEM-authored portions are distributed under the **GNU General Public License, version 3 or any later version** (`GPL-3.0-or-later`), consistent with the original source-file notices. See `LICENSE`.
 
-This repository also contains numerical solver and legacy interface code with separate authorship and provenance. The root license does not erase file-level notices or independently relicense third-party material. See `THIRD_PARTY_NOTICES.md` before redistributing the source or a linked binary.
+This repository also contains numerical solver, legacy interface, and scientific mechanism data with separate authorship and provenance. The root license does not erase file-level notices or independently relicense third-party material. See `THIRD_PARTY_NOTICES.md` before redistributing the source, test data, or a linked binary.
 
 Because GPL-3.0-or-later is a strong copyleft license, distribution of linked applications can create source-code and licensing obligations. Consult the license text and obtain appropriate legal review for commercial or externally distributed products.
 
