@@ -177,8 +177,16 @@
              dYdt => dyindt(2:neq)
           endif
 
+!         dyindt is intent(out); initialise it deterministically so the
+!         early return on an invalid temperature below never hands the
+!         solver an undefined derivative (which it would otherwise use to
+!         build the next step / a numerical Jacobian).
+          dyindt = zero
+
 !         Error handling for NaNs or negatives arising from ODE solver
           where ( abs(Yp) < small ) Yp = sign(small,Yp)
+!         Bail out on a non-positive or NaN temperature. `.not. T > zero`
+!         is true for T<=0 and for NaN. Output is already zeroed above.
           if (.not. T > zero) return
 
 
@@ -409,9 +417,12 @@
                                mass_action_productories
       use reacpar,      only : Troereac, nEQREV, iEQREV, nXREV, iXREV,    &
                                uequilC_and_derivative, nTREV, iTREV,      &
-                               is_beta_pack, tb_beta_pack, n_tb_beta
+                               is_beta_pack, tb_beta_pack, n_tb_beta,      &
+                               n_plog_reactions, plog_reaction,           &
+                               plog_kinf_eval
       use SCspeciesthermo, only : CvuRmol, int_energy, dCv_dT
-      use SCmixturethermo, only : SCP,SCrho,cp,cv, cvmas, molar_volumes
+      use SCmixturethermo, only : SCP,SCrho,cp,cv, cvmas, molar_volumes,  &
+                                  pressurerhoT
       use sparse_chemistry, only: sparse, nudiffT_sparse,                 &
                                   dq_dY_sparse, sparse_allocate,          &
                                   sparse_to_dense,JACYY_sparse,           &
@@ -516,12 +527,14 @@
 !     constV_energy
       real (dp)        :: urho, coefs(5)
 
-      integer :: j,i,k,isp,ire,idqdY
+      integer :: j,i,k,isp,idqdY
       real (dp)        :: frac,tenthT
 
 !     PART 1 - DERIVATIVES WITH RESPECT TO TEMPERATURE ****************
       real (dp)                              :: dT_dT
       real (dp)       , dimension(nr)        :: dkinfdT, dkbdT
+      real (dp)       , dimension(nr)        :: plog_dlnk_dlnP
+      real (dp)       , dimension(nr)        :: plog_dq_dlnP
       real (dp)       , dimension(ntbFALL)   :: dk0dTs, k0s
       real (dp)       , dimension(ntbFALL)   :: dk0dT, k0, k0M
       real (dp)       , dimension(nr)        :: dq_dT
@@ -543,7 +556,10 @@
       real (dp)       , dimension(:,:), allocatable :: dMeff_dY
       real (dp)                                     :: C_pow_nu
       real (dp)       , dimension(neq-1)            :: dlogP_dY
+      real (dp)       , dimension(ns)               :: plog_dY_dlnP
       real (dp)       , dimension(neq-1), target    :: YY
+      logical          , dimension(nr)               :: plog_reaction_mask
+      logical          , dimension(ns)               :: plog_output_row
 
 !     PART 3 - TEMPERATURE DERIVATIVES WITH RESPECT TO SPECIES ********
       real (dp)       , dimension(neq-1)         :: JACYYT_UuMW
@@ -585,27 +601,39 @@
       where ( abs(Y) < small ) Y = sign(small,Y)
       uY = one/Y
 
-!     Error check on temperature (.not.T>0.e0_dp) means T is negative
-!     or NaN; the same for pressure
-      if (.not. T   > zero) return
-      if (.not. SCP > zero) return
+!     Error check on temperature/density. The Jacobian must recompute
+!     pressure from its own input state; relying on SCP from the preceding
+!     RHS call is wrong for finite differences and solver callback orders.
+!     On an invalid state, set the sparse
+!     Jacobian to a safe placeholder (as the empty/wrong-item guard above
+!     does) rather than returning with JAC_sparse left at its stale value
+!     from a previous call.
+      if (.not. T > zero .or. .not. SCrho > zero) then
+         if (allocated(JAC_sparse%A)) JAC_sparse%A = small
+         return
+      endif
+      SCP = pressurerhoT(T,Y)
+      if (.not. SCP > zero) then
+         if (allocated(JAC_sparse%A)) JAC_sparse%A = small
+         return
+      endif
 
 !     Flag to compute using accurate/tabulated thermodynamic data
       compute_accurate_thermo = .not.use_table(T)
 
-!     Assign Jacobian sub-parts: ÚÄÄÄÄÂÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
-!                                ³dTdT³        JACTY          ³
-!                                ÃÄÄÄÄÅÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ´
-!                                ³    ³                       ³
-!                                ³ d  ³                       ³
-!                                ³ Y  ³                       ³
-!                                ³ _  ³                       ³
-!                                ³ d  ³        JACYY          ³
-!                                ³ T  ³                       ³
-!                                ³    ³                       ³
-!                                ³    ³                       ³
-!                                ³    ³                       ³
-!                                ÀÄÄÄÄÁÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+!     Assign Jacobian sub-parts: ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿
+!                                ï¿½dTdTï¿½        JACTY          ï¿½
+!                                ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä´
+!                                ï¿½    ï¿½                       ï¿½
+!                                ï¿½ d  ï¿½                       ï¿½
+!                                ï¿½ Y  ï¿½                       ï¿½
+!                                ï¿½ _  ï¿½                       ï¿½
+!                                ï¿½ d  ï¿½        JACYY          ï¿½
+!                                ï¿½ T  ï¿½                       ï¿½
+!                                ï¿½    ï¿½                       ï¿½
+!                                ï¿½    ï¿½                       ï¿½
+!                                ï¿½    ï¿½                       ï¿½
+!                                ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 !     ** Load thermodynamic temperature-dependent parameters **************
 !     Temperatures and beyond
@@ -633,6 +661,13 @@
          call reaction_rates_and_derivative(Ta, k0, dk0dT, kinf, dkinfdT, iT, frac)
 
       endif
+
+!     Replace the placeholder Arrhenius rate and derivative for every
+!     PLOG reaction. dkinfdT includes both the interpolated node
+!     temperature derivative and dlnk/dlnP * dlnP/dT at fixed rho,Y.
+      plog_dlnk_dlnP = zero
+      if (n_plog_reactions > 0)                                        &
+         call plog_kinf_eval(Ta, SCP, kinf, dkinfdT, plog_dlnk_dlnP)
 
 !     Specific heat [J/mol/K]
       Cvmol = Cvmol * R
@@ -671,10 +706,12 @@
 !     Computing reaction rate constants according to Troe's form
       troefactors: if (ntbTROE > 0) then
 
-        Pr2 = Pr(iTROEiTBFALL)
+        Pr2 = max(Pr(iTROEiTBFALL), sqrt(tiny(one)))
 
 !       ** Computing troe centering factor
-         log10Pr    = log10(Pr2/(one-Pr2))
+!       Species-specific collider channels can have M=0 and therefore
+!       Pr=0. Evaluate the Pr->0 limit without log10(0) or Inf/Inf.
+         log10Pr = log10(Pr2) - log10(max(one-Pr2, tiny(one)))
 
 !        ** Troe model parameters
          ctroe = -0.40_dp - 0.67_dp * log10Fcent
@@ -690,6 +727,9 @@
       endif troefactors
 
       if (ntbFALL > 0) then
+!        A zero collider is valid. This working-precision floor is
+!        chemically negligible and keeps q/FTL derivatives finite.
+         FTL = max(FTL, sqrt(tiny(one)))
          kf(itbFALL) = kf(itbFALL) * FTL
 !        Reciprocal of pressure-dependent reaction factor
          uFTL = one/FTL
@@ -876,9 +916,10 @@
          dFTL_dY_sp                    = sparse_col_prod(dMeff_dY_sp, prod_rate_consts)
 
 !        B) Troe reactions
-         Pr_dlogFT_dlodPr_uMi              = one
-         Pr_dlogFT_dlodPr_uMi(iTROEitbALL) = Pr_dlogFT_dlodPr_uMi(iTROEitbALL) &
-                                           * Pr2 * dlogFtroe_dlogPr /M(iTROEitbALL)
+         Pr_dlogFT_dlodPr_uMi = one
+!        Exact zero-safe identity: Pr/M = k0/(kinf+k0*M).
+         Pr_dlogFT_dlodPr_uMi(iTROEitbALL) = dlogFtroe_dlogPr *       &
+              k0(iTROEitbFALL) * ukinfpmk0(iTROEitbFALL)
 
          tmp_sp = dFTL_dY_sp + sparse_col_prod(dMeff_dY_sp, Pr_dlogFT_dlodPr_uMi)
          dFTL_dY_sp = tmp_sp
@@ -899,12 +940,93 @@
 
       call sparse_row_prod_valonly(dq_dY_sparse, uY)
 
-      tmp_sp = sparse_partial_sum(dq_dY_sparse,dFTL_dY_sp,itbALL)
-      dq_dY_sparse = tmp_sp
+      if (ntbALL > 0) then
+         tmp_sp = sparse_partial_sum(dq_dY_sparse,dFTL_dY_sp,itbALL)
+         dq_dY_sparse = tmp_sp
+      endif
 
 !     RETRIEVING SPARSE FORMULATION FOR JACYY_SPARSE MATRIX
-      if (.not.sparse_jac) call sparse_symbolic_mm(nudiffT_molarv_sparse, dq_dY_sparse, JACYY_sparse)
+!     PLOG composition coupling is a rank-one update after multiplication
+!     by the species stoichiometry matrix:
+!       dYdot/dY = (nudiff*q*dlnk/dlnP) outer (dlnP/dY).
+!     Build the union of the ordinary symbolic pattern and dense rows for
+!     species changed by PLOG reactions once, then update its values directly.
+!     This avoids inserting n_plog_reactions*ns sparse entries, which caused
+!     repeated array growth and copying on every Jacobian evaluation.
+      if (.not.sparse_jac) then
+         if (n_plog_reactions > 0) then
+            call sparse_symbolic_mm(nudiffT_molarv_sparse, dq_dY_sparse, tmp_sp)
+            plog_reaction_mask = .false.
+            plog_reaction_mask(plog_reaction) = .true.
+            plog_output_row = .false.
+            do i = 1, ns
+               do k = nudiffT_molarv_sparse%IA(i), &
+                      nudiffT_molarv_sparse%IA(i+1)-1
+                  if (plog_reaction_mask(nudiffT_molarv_sparse%JA(k))) then
+                     plog_output_row(i) = .true.
+                     exit
+                  endif
+               enddo
+            enddo
+
+            idqdY = 0
+            do i = 1, ns
+               if (plog_output_row(i)) then
+                  idqdY = idqdY + ns
+               else
+                  idqdY = idqdY + tmp_sp%IA(i+1) - tmp_sp%IA(i)
+               endif
+            enddo
+            call allocate(ns,ns,idqdY,JACYY_sparse)
+            JACYY_sparse%A = zero
+            JACYY_sparse%IA(1) = 1
+            idqdY = 1
+            do i = 1, ns
+               if (plog_output_row(i)) then
+                  JACYY_sparse%JA(idqdY:idqdY+ns-1) = [(j,j=1,ns)]
+                  idqdY = idqdY + ns
+               else
+                  j = tmp_sp%IA(i+1) - tmp_sp%IA(i)
+                  JACYY_sparse%JA(idqdY:idqdY+j-1) = &
+                     tmp_sp%JA(tmp_sp%IA(i):tmp_sp%IA(i+1)-1)
+                  idqdY = idqdY + j
+               endif
+               JACYY_sparse%IA(i+1) = idqdY
+            enddo
+         else
+            call sparse_symbolic_mm(nudiffT_molarv_sparse, dq_dY_sparse, JACYY_sparse)
+         endif
+      endif
       call sparse_2_matmul(nudiffT_molarv_sparse, dq_dY_sparse, JACYY_sparse)
+
+!     At fixed rho,T for an ideal gas,
+!       dlnP/dY_j = (1/W_j) / sum_i(Y_i/W_i).
+!     Forward and reverse rates share the same PLOG multiplier, so q is the
+!     net rate of progress here, including equilibrium-reversible reactions.
+      if (n_plog_reactions > 0) then
+         plog_dq_dlnP = zero
+         do i = 1, n_plog_reactions
+            j = plog_reaction(i)
+            plog_dq_dlnP(j) = q(j)*plog_dlnk_dlnP(j)
+         enddo
+         plog_dY_dlnP = nudiffT_molarv_sparse * plog_dq_dlnP
+         dlogP_dY = uMW / sum(Y*uMW)
+         do i = 1, ns
+            do k = JACYY_sparse%IA(i), JACYY_sparse%IA(i+1)-1
+               j = JACYY_sparse%JA(k)
+               JACYY_sparse%A(k) = JACYY_sparse%A(k) + &
+                  plog_dY_dlnP(i)*dlogP_dY(j)
+            enddo
+         enddo
+      endif
+
+!     Preserve every entry in the one-time PLOG union pattern even when the
+!     initial state has zero pressure slope or rate. JAC_sparse is assembled
+!     from numerical values on this first call and reuses that structure later.
+      if (.not.sparse_jac .and. n_plog_reactions > 0) then
+         where (abs(JACYY_sparse%A) < small) &
+            JACYY_sparse%A = sign(small,JACYY_sparse%A)
+      endif
 
 !     ** PART 3 - TEMPERATURE DERIVATIVES WITH RESPECT TO SPECIES *****
 !     JACTY = d(dT/dt)/dY [K/s]
@@ -1681,17 +1803,4 @@
 
 
       end subroutine conV_integrate
-
-
-
-
-
-
-
-
-
-
-
-
-
 

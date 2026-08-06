@@ -96,7 +96,7 @@ module sparse_algebra
 !        Arrays for sparse matrix computations
    integer :: lspwork,ls2work
    real (dp)       , dimension(:), allocatable :: spwork,s2work
-!$ OMP    THREADPRIVATE(lspwork,ls2work,spwork,s2work)
+!$OMP    THREADPRIVATE(lspwork,ls2work,spwork,s2work)
 
 contains
 
@@ -851,7 +851,8 @@ contains
       &spmatrix%n  <= size(spmatrix%A ) .and.&
       &spmatrix%n  <= size(spmatrix%JA) .and.&
       &spmatrix%nr == size(spmatrix%IA) - 1 .and.&
-      &spmatrix%nc >  0  )&
+      &spmatrix%nc >  0  .and.&
+      &spmatrix%nr >= 0 )&
       &isallocated = .true.
 
 
@@ -1386,7 +1387,10 @@ contains
       &                      ' in sparse_allocate_det:' )"
 
 !            Halt on non-2D matrix
-      if (nrows<1.or.ncols<1) then
+!     Zero-row matrices are valid for optional chemistry features (for
+!     example a mechanism with no third-body reactions). Keep one IA
+!     sentinel and zero-length value/column arrays in that case.
+      if (nrows<0.or.ncols<1.or.nels<0) then
          write(*,fmt_ersize)
          write(*,*)'nrow=',nrows,'nels=',nels,'ncols=',ncols
          stop
@@ -2509,7 +2513,7 @@ contains
       if (A%nc /= B%nc) then
          write(*,*)'Sparse sum: wrong number of columns'
          write(*,*)'A=',A%nc,' B=',B%nc
-         stop
+         error stop 1
       endif
 
       if (alpha==0.e0_dp .or. beta==0.e0_dp) then
@@ -3605,4 +3609,3 @@ contains
 
 
 end module sparse_algebra
-

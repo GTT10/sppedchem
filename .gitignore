@@ -42,3 +42,9 @@ dat.cktherm
 dat.mechanism
 dat.janafwarn
 driver_smoke
+driver_plog
+driver_plog_eval
+driver_rhs_probe
+
+# ---- Local planning doc (GPT-5.6 pro plan; not tracked) ----
+plan.md

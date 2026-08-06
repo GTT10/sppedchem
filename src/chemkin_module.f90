@@ -13,6 +13,7 @@
 
       module chemkinII
 
+      use chemistry_string_limits, only: species_name_len
 
       implicit none
       public
@@ -2219,7 +2220,7 @@
 !                   Data type - real array
 !                   Dimension RCKWRK(*) at least LENRWK.
 !     CCKWRK - Array of character work space.
-!                   Data type - CHARACTER*16 array
+!                   Data type - CHARACTER*18 array
 !                   Dimension CCKWRK(*) at least LENCWK.
       IMPLICIT DOUBLE PRECISION (A-H, O-Z), INTEGER (I-N)
 
@@ -2257,7 +2258,7 @@
                            MAXSP, MAXTB, MAXTP, NTHCF, NIPAR, NITAR,  &
                            NIFAR, NRV, NFL, NTB, NLT, NRL, NW, NCHRG
 
-      IF (LEN(CCKWRK(1)) .LT. 16) THEN
+      IF (LEN(CCKWRK(1)) .LT. species_name_len) THEN
          WRITE (LOUT,475)
          stop
       ENDIF
@@ -2472,7 +2473,7 @@
   300 FORMAT (10X,'ICKWRK MUST BE DIMENSIONED AT LEAST ',I5)
   350 FORMAT (10X,'RCKWRK MUST BE DIMENSIONED AT LEAST ',I5)
   375 FORMAT (10X,'CCKWRK MUST BE DIMENSIONED AT LEAST ',I5)
-  475 FORMAT (10X,'CHARACTER LENGTH OF CCKWRK MUST BE AT LEAST 16 ')
+  475 FORMAT (10X,'CHARACTER LENGTH OF CCKWRK MUST BE AT LEAST 18 ')
       END SUBROUTINE CKINIT
 
 
@@ -4063,7 +4064,7 @@
 !     RCKWRK - Array of real workspace containing real data.
 !                   Data type - real array
 !     CCKWRK - Array of character workspace containing character data.
-!                   Data type - CHARACTER*16 array
+!                   Data type - CHARACTER*18 array
       IMPLICIT DOUBLE PRECISION (A-H, O-Z), INTEGER (I-N)
       DIMENSION ICKWRK(*), RCKWRK(*)
       CHARACTER CCKWRK(*)*(*)
@@ -5727,9 +5728,8 @@
 !   END PROLOGUE  IPPARR
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 
-      CHARACTER STRING*(*), ITEMP*80
+      CHARACTER STRING*(*), ITEMP*256, FMT_DYNAMIC*32
       DIMENSION RVAL(*)
-      CHARACTER *8 FMT(16)
       LOGICAL OKINCR
 
 !   FIRST EXECUTABLE STATEMENT  IPPARR
@@ -5788,15 +5788,21 @@
          GO TO 500
       ENDIF
 
-      DATA FMT/     ' (E1.0)', ' (E2.0)', ' (E3.0)', ' (E4.0)',  &
-         ' (E5.0)', ' (E6.0)', ' (E7.0)', ' (E8.0)', ' (E9.0)',  &
-         '(E10.0)', '(E11.0)', '(E12.0)', '(E13.0)', '(E14.0)',  &
-         '(E15.0)', '(E16.0)'/
       IES = NC - 1
       NCH = IES - IBS + 1
+      IF (NCH .GT. LEN(ITEMP)) THEN
+         IERR = 1
+         GO TO 510
+      ENDIF
       ITEMP = ' '
       ITEMP = STRING(IBS:IES)
-      READ (ITEMP(:NCH), FMT(NCH), ERR = 400) RVAL(NFOUND)
+!     The original IOPAK table only defined E formats through E16.0.
+!     yaml2ck legitimately emits round-trip decimal tokens such as
+!     0.010000000000000004 (20 characters), which previously indexed
+!     beyond that table and made valid PLOG lines fail as syntax errors.
+!     Construct the identical Ew.0 descriptor for the actual width.
+      WRITE (FMT_DYNAMIC,'("(E",I0,".0)")') NCH
+      READ (ITEMP(:NCH), FMT_DYNAMIC, ERR = 400) RVAL(NFOUND)
       GO TO 450
 400   CONTINUE
       IERR = 1
@@ -6008,6 +6014,327 @@
       end module chemkinII
 
 !     *****************************************************************
+!     **                                                             **
+!     **   PLOG COLLECTION (cklink v2, stage 1 PLOG plumbing)        **
+!     **                                                             **
+!     **   Dynamic, growable parse-time storage for PLOG             **
+!     **   (pressure-dependent Arrhenius) reactions. The classic     **
+!     **   CHEMKIN interpreter threads every feature through the     **
+!     **   CKAUXL/CKINTP argument lists and fixed-size arrays        **
+!     **   (KORD(3000,9000) etc.); PLOG instead lives here as a      **
+!     **   self-contained module so no giant argument chain or       **
+!     **   static MAXPLOG x IDIM array is added (see plan.md         **
+!     **   "推奨する内部データ構造").                                **
+!     **                                                             **
+!     **   CKAUXL calls plog_add_line() once per `PLOG / P A b E /`  **
+!     **   line; CKINTP calls plog_finalize() before writing cklink  **
+!     **   and reads the packed arrays out. Pressures must be         **
+!     **   non-decreasing per reaction. Adjacent equal-pressure       **
+!     **   entries are retained as the multiple Arrhenius terms that  **
+!     **   CHEMKIN/Cantera sum at that pressure.                      **
+!     *****************************************************************
+
+      module plog_collect
+
+      use working_precision, only: dp
+      implicit none
+      public
+
+!     Dialect selector retained for on-disk/API compatibility. Both
+!     accepted modes use standard grouped same-pressure PLOG semantics.
+      integer, parameter :: PLOG_STRICT_CHEMKIN     = 0
+      integer, parameter :: PLOG_PERMISSIVE_GROUPED = 1
+      integer :: plog_dialect = PLOG_STRICT_CHEMKIN
+
+!     Growable flat list of PLOG lines, in the order encountered.
+!     Each entry i: pcl_reac(i)=reaction index, pcl_logP(i)=ln(P[Pa]),
+!     pcl_A/pcl_b/pcl_EoverR(i)=Arrhenius params (A in input units,
+!     b dimensionless, E/R in K). Grown geometrically to avoid a fixed
+!     upper bound.
+      integer :: plog_nlines = 0
+      integer, dimension(:), allocatable :: pcl_reac
+      real (dp), dimension(:), allocatable :: pcl_logP
+      real (dp), dimension(:), allocatable :: pcl_A
+      real (dp), dimension(:), allocatable :: pcl_b
+      real (dp), dimension(:), allocatable :: pcl_EoverR
+
+!     Packed output (filled by plog_finalize), mirrors the reacpar
+!     packed layout so cklink v2 write is a direct dump:
+!       plog_n_reactions              : # distinct PLOG reactions
+!       plog_reaction(1:nr_plog)      : their global reaction indices (asc)
+!       plog_node_ptr(0:nr_plog)      : node range per reaction (CSR)
+!       plog_logP_out(1:n_nodes)      : ln(P[Pa]) per entry (non-decreasing)
+!       plog_A_out/b_out/EoverR_out   : one Arrhenius set per entry
+!     Adjacent entries with equal pressure form one pressure node and
+!     are summed by the evaluator. The cklink v2 representation remains
+!     backward compatible because unique-pressure files are unchanged.
+      integer :: plog_n_reactions = 0
+      integer :: plog_n_nodes     = 0
+      integer, dimension(:), allocatable :: plog_reaction
+      integer, dimension(:), allocatable :: plog_node_ptr
+      real (dp), dimension(:), allocatable :: plog_logP_out
+      real (dp), dimension(:), allocatable :: plog_A_out
+      real (dp), dimension(:), allocatable :: plog_b_out
+      real (dp), dimension(:), allocatable :: plog_EoverR_out
+
+      contains
+
+!     -------------------------------------------------------------
+!     plog_reset: clear all state (call at start of a CKINTP run).
+!     -------------------------------------------------------------
+      subroutine plog_reset
+      implicit none
+      plog_nlines = 0
+      plog_n_reactions = 0
+      plog_n_nodes = 0
+      if (allocated(pcl_reac))        deallocate(pcl_reac)
+      if (allocated(pcl_logP))        deallocate(pcl_logP)
+      if (allocated(pcl_A))           deallocate(pcl_A)
+      if (allocated(pcl_b))           deallocate(pcl_b)
+      if (allocated(pcl_EoverR))      deallocate(pcl_EoverR)
+      if (allocated(plog_reaction))   deallocate(plog_reaction)
+      if (allocated(plog_node_ptr))   deallocate(plog_node_ptr)
+      if (allocated(plog_logP_out))   deallocate(plog_logP_out)
+      if (allocated(plog_A_out))      deallocate(plog_A_out)
+      if (allocated(plog_b_out))      deallocate(plog_b_out)
+      if (allocated(plog_EoverR_out)) deallocate(plog_EoverR_out)
+      end subroutine plog_reset
+
+!     -------------------------------------------------------------
+!     plog_grow: ensure the flat lists hold at least nreq entries,
+!     preserving contents (geometric growth).
+!     -------------------------------------------------------------
+      subroutine plog_grow(nreq)
+      implicit none
+      integer, intent(in) :: nreq
+      integer :: newcap, oldcap
+      integer, dimension(:), allocatable :: itmp
+      real (dp), dimension(:), allocatable :: rtmp
+      if (allocated(pcl_reac)) then
+         oldcap = size(pcl_reac)
+      else
+         oldcap = 0
+      endif
+      if (nreq <= oldcap) return
+      newcap = max(16, oldcap*2)
+      do while (newcap < nreq)
+         newcap = newcap*2
+      end do
+!     integer field
+      allocate(itmp(newcap)); itmp = 0
+      if (oldcap > 0) itmp(1:oldcap) = pcl_reac(1:oldcap)
+      call move_alloc(itmp, pcl_reac)
+!     real fields
+      allocate(rtmp(newcap)); rtmp = 0.0_dp
+      if (oldcap > 0) rtmp(1:oldcap) = pcl_logP(1:oldcap)
+      call move_alloc(rtmp, pcl_logP)
+      allocate(rtmp(newcap)); rtmp = 0.0_dp
+      if (oldcap > 0) rtmp(1:oldcap) = pcl_A(1:oldcap)
+      call move_alloc(rtmp, pcl_A)
+      allocate(rtmp(newcap)); rtmp = 0.0_dp
+      if (oldcap > 0) rtmp(1:oldcap) = pcl_b(1:oldcap)
+      call move_alloc(rtmp, pcl_b)
+      allocate(rtmp(newcap)); rtmp = 0.0_dp
+      if (oldcap > 0) rtmp(1:oldcap) = pcl_EoverR(1:oldcap)
+      call move_alloc(rtmp, pcl_EoverR)
+      end subroutine plog_grow
+
+!     -------------------------------------------------------------
+!     plog_add_line: record one `PLOG / P A b E /` line for reaction
+!     `ireac`. P is in atm (CHEMKIN convention), A/b are Arrhenius
+!     params in the mechanism's declared units, `eraw` is the activation
+!     energy exactly as read (same raw units as PAR(3,*) before EFAC).
+!     It is stored raw here and converted to E/R [K] later by
+!     plog_apply_efac(), so PLOG E goes through the SAME unit handling
+!     (CAL/KCAL/JOUL/KJOU/KELV) as every other Arrhenius E — no separate
+!     conversion path that could drift (cf. the KJOU 4x bug).
+!     Sets kerr=.true. on invalid input (non-positive pressure); the
+!     pressure-ordering checks happen in plog_finalize
+!     where all lines of a reaction are visible together.
+!     -------------------------------------------------------------
+      subroutine plog_add_line(ireac, pressure_atm, aval, bval, eraw, kerr, lout)
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      implicit none
+      integer, intent(in) :: ireac, lout
+      real (dp), intent(in) :: pressure_atm, aval, bval, eraw
+      logical, intent(inout) :: kerr
+      real (dp), parameter :: atm_to_pa = 101325.0_dp
+      if (.not. (pressure_atm > 0.0_dp)) then
+!        Fail-closed: non-positive PLOG pressure is a hard input error;
+!        error stop (not STOP/return) so it is detectable by exit code.
+         write(*   ,'(A,I6,A,1PE12.4,A)')                              &
+            ' ERROR...PLOG pressure for reaction ', ireac,             &
+            ' is not positive (', pressure_atm, ' atm)'
+         write(lout,'(A,I6,A,1PE12.4,A)')                              &
+            ' ERROR...PLOG pressure for reaction ', ireac,             &
+            ' is not positive (', pressure_atm, ' atm)'
+         kerr = .true.
+         error stop 1
+      endif
+      if (.not. ieee_is_finite(aval) .or. .not. (aval > 0.0_dp)) then
+         write(*   ,'(A,I6,A,1PE12.4)')                               &
+            ' ERROR...PLOG A factor for reaction ', ireac,            &
+            ' must be finite and positive; got ', aval
+         write(lout,'(A,I6,A,1PE12.4)')                               &
+            ' ERROR...PLOG A factor for reaction ', ireac,            &
+            ' must be finite and positive; got ', aval
+         kerr = .true.
+         error stop 1
+      endif
+      call plog_grow(plog_nlines+1)
+      plog_nlines = plog_nlines + 1
+      pcl_reac(plog_nlines)   = ireac
+      pcl_logP(plog_nlines)   = log(pressure_atm*atm_to_pa)
+      pcl_A(plog_nlines)      = aval
+      pcl_b(plog_nlines)      = bval
+      pcl_EoverR(plog_nlines) = eraw   ! raw E; converted by plog_apply_efac
+      end subroutine plog_add_line
+
+!     -------------------------------------------------------------
+!     plog_apply_efac: multiply the stored (raw) E of every PLOG line
+!     belonging to reaction `ireac` by `efac`, converting E -> E/R [K].
+!     Called from CPREAC once per reaction, right where PAR(3,II) is
+!     converted, so PLOG activation energies use the identical EFAC.
+!     Idempotency is the caller's responsibility (CPREAC runs once per
+!     reaction); we only touch lines whose reaction index matches.
+!     -------------------------------------------------------------
+      subroutine plog_apply_efac(ireac, efac)
+      implicit none
+      integer, intent(in) :: ireac
+      real (dp), intent(in) :: efac
+      integer :: i
+      if (plog_nlines <= 0) return
+      do i = 1, plog_nlines
+         if (pcl_reac(i) == ireac) pcl_EoverR(i) = pcl_EoverR(i) * efac
+      end do
+      end subroutine plog_apply_efac
+
+!     -------------------------------------------------------------
+!     plog_apply_afac: apply the same global MOLECULES -> MOLES
+!     conversion used for the main Arrhenius A factor. PLOG replaces
+!     the main rate expression, so every pressure-node A must receive
+!     the identical reaction-order-dependent conversion.
+!     -------------------------------------------------------------
+      subroutine plog_apply_afac(ireac, afac)
+      implicit none
+      integer, intent(in) :: ireac
+      real (dp), intent(in) :: afac
+      integer :: i
+      if (plog_nlines <= 0) return
+      do i = 1, plog_nlines
+         if (pcl_reac(i) == ireac) pcl_A(i) = pcl_A(i) * afac
+      end do
+      end subroutine plog_apply_afac
+
+!     -------------------------------------------------------------
+!     plog_finalize: turn the flat line list into packed, per-reaction
+!     CSR arrays. Within each reaction, pressure entries must be
+!     non-decreasing. Equal adjacent entries are legal grouped terms.
+!     Lines are already grouped by reaction because CKAUXL processes one
+!     reaction's aux lines consecutively; we still group defensively.
+!     Sets kerr=.true. on a strict-dialect violation.
+!     -------------------------------------------------------------
+      subroutine plog_finalize(kerr, lout)
+      implicit none
+      logical, intent(inout) :: kerr
+      integer, intent(in) :: lout
+      integer :: i, j, r, nreac, node, ir
+      integer, dimension(:), allocatable :: uniq
+      real (dp), parameter :: logp_tol = 1.0e-9_dp
+
+      plog_n_reactions = 0
+      plog_n_nodes = 0
+      if (plog_nlines <= 0) then
+!        No PLOG reactions: leave empty packed arrays (size 0) so the
+!        v2 writer emits a count of 0 and nothing else changes.
+         allocate(plog_reaction(0), plog_node_ptr(0:0))
+         plog_node_ptr(0) = 0
+         allocate(plog_logP_out(0), plog_A_out(0), plog_b_out(0), &
+                  plog_EoverR_out(0))
+         return
+      endif
+
+!     Distinct reaction indices, in first-seen order (CKINTP numbers
+!     reactions ascending, so this is ascending too).
+      allocate(uniq(plog_nlines))
+      nreac = 0
+      do i = 1, plog_nlines
+         ir = pcl_reac(i)
+         if (nreac == 0) then
+            nreac = 1
+            uniq(1) = ir
+         elseif (ir /= uniq(nreac)) then
+!           Guard: a reaction's PLOG lines must be contiguous. If a
+!           previously-seen reaction reappears, the mechanism interleaved
+!           PLOG lines in a way we don't support -> refuse.
+            do j = 1, nreac
+               if (uniq(j) == ir) then
+!                 Fail-closed: a plain STOP here is exit 0 (reads as
+!                 success to a test harness); use error stop so an
+!                 invalid PLOG mechanism is detectable by exit code.
+                  write(*   ,'(A,I6,A)')                                &
+                     ' ERROR...PLOG lines for reaction ', ir,           &
+                     ' are not contiguous in the input'
+                  write(lout,'(A,I6,A)')                                &
+                     ' ERROR...PLOG lines for reaction ', ir,           &
+                     ' are not contiguous in the input'
+                  kerr = .true.
+                  error stop 1
+               endif
+            end do
+            nreac = nreac + 1
+            uniq(nreac) = ir
+         endif
+      end do
+
+      plog_n_reactions = nreac
+      plog_n_nodes = plog_nlines
+      allocate(plog_reaction(nreac), plog_node_ptr(0:nreac))
+      allocate(plog_logP_out(plog_nlines), plog_A_out(plog_nlines), &
+               plog_b_out(plog_nlines), plog_EoverR_out(plog_nlines))
+      plog_node_ptr(0) = 0
+
+      node = 0
+      do r = 1, nreac
+         plog_reaction(r) = uniq(r)
+         do i = 1, plog_nlines
+            if (pcl_reac(i) == uniq(r)) then
+               node = node + 1
+!              Standard PLOG: pressure entries are non-decreasing.
+!              Equal adjacent pressures are multiple Arrhenius terms at
+!              one pressure node and are summed during rate evaluation.
+               if (node > plog_node_ptr(r-1)+1) then
+                  if (pcl_logP(i) < plog_logP_out(node-1) - logp_tol) then
+!                    Fail-closed (see note above): error stop, not STOP.
+                     write(*   ,'(A,I6,A)')                             &
+                        ' ERROR...PLOG pressures for reaction ',        &
+                        uniq(r),                                        &
+                        ' are out of order (pressures must be'//         &
+                        ' non-decreasing)'
+                     write(lout,'(A,I6,A)')                             &
+                        ' ERROR...PLOG pressures for reaction ',        &
+                        uniq(r),                                        &
+                        ' are out of order (pressures must be'//         &
+                        ' non-decreasing)'
+                     kerr = .true.
+                     error stop 1
+                  endif
+               endif
+               plog_logP_out(node)    = pcl_logP(i)
+               plog_A_out(node)       = pcl_A(i)
+               plog_b_out(node)       = pcl_b(i)
+               plog_EoverR_out(node)  = pcl_EoverR(i)
+            endif
+         end do
+         plog_node_ptr(r) = node
+      end do
+
+      deallocate(uniq)
+      end subroutine plog_finalize
+
+      end module plog_collect
+
+!     *****************************************************************
 !     *****************************************************************
 !     *****************************************************************
 
@@ -6068,7 +6395,7 @@
 !     NFAR = number of fall-off parameters in a reaction;          (8)
 !     MAXSP= maximum number of species in a reaction               (6)
 !     MAXTB= maximum number of third bodies for a reaction        (10)
-!     LSYM = character string length of element and species names (16)
+!     LSYM = character string length of element and species names (18)
 !
 !     User input is read from LIN (Unit15), a thermodynamic database
 !     is read from LTHRM (Unit17), printed output is assigned to LOUT
@@ -6300,12 +6627,21 @@
 
       USE chemkinII,    only: IPPLEN, ILASCH, UPCASE, IFIRCH, IPPARR,&
                               chemdat
+      USE chemistry_string_limits, only: species_name_len,            &
+                                          mechanism_line_len
 !ck2015
       USE chemistry_setup, only: mechdir
+!     PLOG collection + cklink v2 packed arrays (stage 1 PLOG plumbing)
+      USE plog_collect, only: plog_reset, plog_finalize,               &
+                              plog_n_reactions, plog_n_nodes,          &
+                              plog_reaction, plog_node_ptr,            &
+                              plog_logP_out, plog_A_out, plog_b_out,   &
+                              plog_EoverR_out
 
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 !
-      PARAMETER (MDIM=10,KDIM=3000, MKDIM=MDIM*KDIM,IDIM=9000,LSYM=16,&
+      PARAMETER (MDIM=10,KDIM=3000, MKDIM=MDIM*KDIM,IDIM=9000,        &
+                 LSYM=species_name_len,                                &
                  NPAR=3, NPIDIM=IDIM*NPAR, NPC=5, NPCP2=NPC+2, MAXTP=3,&
                  NTR=MAXTP-1, NKTDIM=NTR*NPCP2*KDIM, MAXSP=8,MAXTB=10,&
                  NLAR=2, NSIDIM=MAXSP*IDIM, NTIDIM=MAXTB*IDIM,&
@@ -6314,9 +6650,26 @@
                  LTHRM=42, LINC=43, CKMIN=1.0E-3, MAXORD=KDIM,&
                  NOIDIM=MAXORD*IDIM)
 !
-      CHARACTER KNAME(KDIM)*(LSYM), ENAME(MDIM)*(LSYM), SUB(80)*80,&
-                KEY(5)*4, LINE*80, IUNITS*80, AUNITS*4, EUNITS*4,&
-                VERS*(LSYM), PREC*(LSYM), FILETD*80 !UPCASE*4
+!     Modern yaml2ck output is not restricted to the historical
+!     80-column CHEMKIN card width (real mechanisms contain lines up to
+!     at least 116 characters). Keep thermo-card readers at 80 columns,
+!     but do not truncate mechanism/reaction and auxiliary-data lines.
+      CHARACTER KNAME(KDIM)*(LSYM), ENAME(MDIM)*(LSYM),               &
+                SUB(80)*mechanism_line_len, KEY(5)*4,                 &
+                LINE*mechanism_line_len, IUNITS*80, AUNITS*4,         &
+                EUNITS*4,&
+!               FILETD holds trim(mechdir)//"therm.dat"; mechdir is
+!               len=256 (chemistry_setup), so 80 silently truncated long
+!               paths and therm.dat could not be opened. Match mechdir.
+!     VERS/PREC are cklink header metadata with a legacy 16-character
+!     record contract; they are independent of the species-name width.
+                VERS*16, PREC*16, FILETD*265 !UPCASE*4
+!     cklink v2 schema: a leading magic + integer schema version so the
+!     reader can positively identify the format and refuse older/newer
+!     files, replacing the fragile VERS-string check. Bump CK_SCHEMA on
+!     any on-disk layout change.
+      CHARACTER(len=8), PARAMETER :: CK_MAGIC = 'SCLKv2  '
+      INTEGER, PARAMETER          :: CK_SCHEMA = 3
 !
       DIMENSION AWT(MDIM), KNCF(MDIM,KDIM), WTM(KDIM), KPHSE(KDIM),&
                 KCHRG(KDIM), A(NPCP2,NTR,KDIM), T(MAXTP,KDIM), NT(KDIM),&
@@ -6367,6 +6720,9 @@
             FILE=trim(mechdir)//chemdat)
 !
       VERS = '3.1'
+!     Clear any PLOG state left from a previous CKINTP call in the same
+!     process (cklink v2, stage 1 PLOG plumbing).
+      CALL plog_reset
       WRITE  (LOUT, 15) VERS(:4)
    15 FORMAT (/ &
       ' CHEMKIN INTERPRETER OUTPUT: CHEMKIN-II Version ',A,' Aug. 1994' &
@@ -6651,6 +7007,15 @@
                   FILE=trim(mechdir)//"cklink")
 
       REWIND LINC
+!     cklink v2: pack the collected PLOG lines into per-reaction arrays
+!     and enforce non-decreasing pressure order. A violation sets KERR,
+!     so the gate below writes only a truncated (magic+header) cklink
+!     and exits non-zero.
+      CALL plog_finalize(KERR, LOUT)
+!     v2 leading record: magic + integer schema version. Positively
+!     identifies the format for the reader (SCcklink) — supersedes the
+!     fragile VERS-string check.
+      WRITE (LINC) CK_MAGIC, CK_SCHEMA
       WRITE (LINC) VERS, PREC, KERR
 
 !
@@ -6659,7 +7024,7 @@
          ' WARNING...THERE IS AN ERROR IN THE LINKING FILE'
          CLOSE (LINC)
          CLOSE (LOUT)
-         STOP
+         ERROR STOP 1
       ENDIF
 !
       DO 1150 K = 1, KK
@@ -6745,6 +7110,33 @@
             ' WARNING...NO REACTION INPUT FOUND; ', &
             ' LINKING FILE HAS NO REACTION INFORMATION ON IT.'
       ENDIF
+!
+!     ---------------------------------------------------------------
+!     cklink v2 PLOG SECTION (always written; counts are 0 when the
+!     mechanism has no PLOG reactions, so the layout is fixed-position
+!     and a no-PLOG mechanism's downstream numeric path is unchanged).
+!     Records, in order:
+!       1) counts        : n_plog_reactions, n_plog_nodes
+!       2) reaction map  : plog_reaction(1:nr), plog_node_ptr(0:nr)
+!       3) node data     : plog_logP, plog_A, plog_b, plog_EoverR
+!                          (each length n_plog_nodes)
+!       4) checksum      : integer sum, a cheap end-of-section sentinel
+!     Units on disk: logP = ln(P[Pa]); A,b as declared; EoverR = E/R[K].
+!     ---------------------------------------------------------------
+      WRITE (LINC) plog_n_reactions, plog_n_nodes
+      IF (plog_n_reactions .GT. 0) THEN
+         WRITE (LINC) (plog_reaction(N), N = 1, plog_n_reactions)
+         WRITE (LINC) (plog_node_ptr(N), N = 0, plog_n_reactions)
+         WRITE (LINC) (plog_logP_out(N),   N = 1, plog_n_nodes)
+         WRITE (LINC) (plog_A_out(N),      N = 1, plog_n_nodes)
+         WRITE (LINC) (plog_b_out(N),      N = 1, plog_n_nodes)
+         WRITE (LINC) (plog_EoverR_out(N), N = 1, plog_n_nodes)
+      ENDIF
+!     Section checksum: reactions + nodes + last node-ptr. Not crypto —
+!     just catches a truncated/misaligned PLOG section on read.
+      WRITE (LINC) plog_n_reactions + plog_n_nodes +                   &
+                   MERGE(plog_node_ptr(plog_n_reactions), 0,           &
+                         plog_n_reactions .GT. 0)
 !
       WRITE (LOUT, '(///A)')&
          ' NO ERRORS FOUND ON INPUT...CHEMKIN LINKING FILE WRITTEN.'
@@ -7004,6 +7396,7 @@
 !             KERR   - logical error flag
 !----------------------------------------------------------------------!
       USE chemkinII, only: IPPLEN, IPPARR, UPCASE
+      USE chemistry_string_limits, only: species_name_len
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 !
       DIMENSION WTM(*), NT(*), T(MAXTP,*), KPHSE(*), KNCF(MDIM,*), &
@@ -7028,7 +7421,10 @@
           UPCASE(SUB(1), 4) .EQ. 'REAC') RETURN
 !
       IF (ILEN.LT.80 .OR. ISTR(80:80).NE.'1') GO TO 10
-      CALL CKCOMP (SUB(1), KNAME, KK, K)
+!     NASA-7 reserves columns 1:18 for the species identifier. Reading
+!     that fixed field supports a full 18-character name even when the
+!     date field starts immediately in column 19 with no separating blank.
+      CALL CKCOMP (ISTR(:species_name_len), KNAME, KK, K)
 !
       IF (K.LE.0)  GO TO 10
       IF (ITHRM(K)) GO TO 10
@@ -7177,13 +7573,15 @@
 !                                      F. Rupley, Div. 8245, 5/13/86
 !----------------------------------------------------------------------!
       USE chemkinII, only: ILASCH, IPPARR, IPPARI, UPCASE
+      USE chemistry_string_limits, only: mechanism_line_len
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 
       DIMENSION NSPEC(*), NREAC(*), NUNK(MAXSP,*), NU(MAXSP,*),       &
                 PAR(NPAR,*), IFAL(*), KFAL(*), ITHB(*), IWL(*), WL(*),&
                 IRNU(*), RNU(MAXSP,*), IPLUS(20), RVAL(10), IVAL(10)
       CHARACTER KNAME(*)*(*), LINE*(*), CNUM(11)*1!, UPCASE*4
-      CHARACTER*80 ISTR, IREAC, IPROD, ISPEC, INAME, ITEMP
+      CHARACTER(len=mechanism_line_len) :: ISTR, IREAC, IPROD, ISPEC, &
+                                            INAME, ITEMP
       LOGICAL KERR, LTHB, LWL, LRSTO
       DATA CNUM/'.','0','1','2','3','4','5','6','7','8','9'/
 !
@@ -7702,6 +8100,8 @@
 !                                        F. Rupley, Div. 8245, 5/27/87
 !----------------------------------------------------------------------!
       USE chemkinII, only: IPPARR, IPPARI, ILASCH, UPCASE
+      USE chemistry_string_limits, only: mechanism_line_len
+      USE plog_collect, only: plog_add_line   ! PLOG collection (cklink v2)
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
 !
       DIMENSION NSPEC(*), ITHB(*), NTBS(*), NKTB(MAXTB,*), IDUP(*),   &
@@ -7714,8 +8114,10 @@
       DIMENSION IEIM(*), ITDEP(*), IJAN(*), PJAN(NJAR,*), IFT1(*),    &
                 PFT1(NF1R,*), IEXC(*), PEXC(*)
 !
-      CHARACTER SUB(*)*(*), KNAME(*)*(*), KEY*80, RSTR*80,            & ! UPCASE*4,  &
-                ISTR*80
+      DIMENSION PLOGV(4)   ! scratch for one `PLOG / P A b E /` line
+!
+      CHARACTER SUB(*)*(*), KNAME(*)*(*), KEY*80,                     & ! UPCASE*4,  &
+                RSTR*mechanism_line_len, ISTR*mechanism_line_len
       LOGICAL KERR, LLAN, LRLT, LTHB, LFAL, LTRO, LSRI, LWL, LREV,    &
               LFORD, LRORD, LEIM, LJAN, LFT1, LEXC
 !
@@ -7972,6 +8374,43 @@
                 ELSE
                    WRITE (LOUT, 3016) KNAME(K),VAL(1)
                 ENDIF
+            ENDIF
+!
+         ELSEIF (UPCASE(KEY, 4) .EQ. 'PLOG') THEN
+!
+!        PRESSURE-DEPENDENT ARRHENIUS (PLOG) — cklink v2, stage 1.
+!        One line per pressure node: PLOG / P[atm] A b E /.
+!        Parsed here and accumulated in the plog_collect module (NOT
+!        threaded through the CKAUXL/CKINTP argument lists). The E value
+!        is stored RAW and converted to E/R[K] later in CPREAC via the
+!        same EFAC as PAR(3,II). Pressure-ordering checks run in
+!        plog_finalize after all entries are visible; equal-pressure
+!        entries are grouped and summed by the evaluator.
+!
+            IF (LTHB .OR. LFAL .OR. LTRO .OR. LSRI .OR. LREV) THEN
+               WRITE(*   ,'(A,I0,A)')                                  &
+                  ' ERROR...PLOG reaction ', II,                       &
+                  ' also uses REV/third-body/falloff syntax'
+               WRITE(LOUT,'(A,I0,A)')                                  &
+                  ' ERROR...PLOG reaction ', II,                       &
+                  ' also uses REV/third-body/falloff syntax'
+               KERR = .TRUE.
+               ERROR STOP 1
+            ENDIF
+            CALL IPPARR (RSTR, 1, 4, PLOGV, NVAL, IER, LOUT)
+            IF (IER .NE. 0 .OR. NVAL .NE. 4) THEN
+               WRITE (LOUT,'(A,A)')                                     &
+                  ' ERROR...PLOG requires exactly 4 values',           &
+                  ' (P[atm] A b E): '//SUB(N)(:ILEN)
+               KERR = .TRUE.
+            ELSE
+!              PLOGV = [P_atm, A, b, E_raw]; add_line validates P>0 and
+!              converts P(atm)->ln(P[Pa]).
+               CALL plog_add_line(II, PLOGV(1), PLOGV(2), PLOGV(3),     &
+                                  PLOGV(4), KERR, LOUT)
+               WRITE (LOUT,'(A,1PE10.3,A,3(1PE12.4))')                  &
+                  '        PLOG: P=', PLOGV(1), ' atm  A,b,E=',         &
+                  PLOGV(2), PLOGV(3), PLOGV(4)
             ENDIF
 !
          ELSEIF (UPCASE(KEY, 3) .EQ. 'EIM') THEN
@@ -8313,6 +8752,7 @@
 !      J. Research National Bureal of Standards, 92, 95, 1987
 !      6.0221367(39) mol-1 )
 !
+      USE plog_collect, only: plog_apply_efac, plog_apply_afac
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
       DOUBLE PRECISION RU_JOUL,        AVAG,                ONE
       PARAMETER (RU_JOUL = 8.3140D0, AVAG = 6.0221367D23, ONE=1.0D0)
@@ -8323,11 +8763,13 @@
                 IREV(*), ITHB(*), ILAN(*), IRLT(*), IRNU(*),        &
                 RNU(MAXSP,*)
       CHARACTER*(*) AUNITS, EUNITS
-      LOGICAL IERR,KERR,LREV,LLAN,LRLT
+      LOGICAL IERR,KERR,LREV,LLAN,LRLT,LREAL
 !
-!ck2015       IF (NRNU.GT.0) THEN
-!ck2015          IF (II.EQ.IRNU(NRNU)) &
-      IF (NRNU.GT.0 .AND. II.EQ.IRNU(NRNU)) THEN
+!     Fortran does not guarantee short-circuit evaluation of .AND.;
+!     do not form IRNU(0) when no real-stoichiometry reaction exists.
+      LREAL = .FALSE.
+      IF (NRNU.GT.0) LREAL = II.EQ.IRNU(NRNU)
+      IF (LREAL) THEN
          CALL CKRBAL (MAXSP, NUNK(1,II), RNU(1,NRNU), MDIM, MM, KCHRG,&
                       KNCF, CKMIN, IERR)
       ELSE
@@ -8400,9 +8842,13 @@
          EFAC = 1.00  / RU_JOUL
       ELSEIF (EUNITS .EQ. 'KJOU') THEN
 !        convert E from Kjoules/mole to Kelvin
-         EFAC = 4000.0 / RU_JOUL
+!        1 kJ/mol = 1000 J/mol (was erroneously 4000.0, a 4x error in E/R)
+         EFAC = 1000.0 / RU_JOUL
       ENDIF
       PAR(3,II) = PAR(3,II) * EFAC
+!
+!     PLOG activation energies use the identical EFAC (E -> E/R [K]).
+      CALL plog_apply_efac(II, EFAC)
 !
 !      IF (NREV.GT.0 .AND. IREV(NREV).EQ.II) RPAR(3,II)=RPAR(3,II)*EFAC
 !      IF (NFAL.GT.0 .AND. IFAL(NFAL).EQ.II) PFAL(3,II)=PFAL(3,II)*EFAC
@@ -8424,6 +8870,10 @@
                NSTOP = NSTOP + NU(N,II)
             ENDIF
    50    CONTINUE
+!        PLOG is valid only for an ordinary gas-phase reaction (the
+!        combination guard runs when cklink is loaded). Its A-factor
+!        conversion therefore uses the unmodified forward molecularity.
+         IF (NSTOR.GT.0) CALL plog_apply_afac(II, AVAG**(NSTOR-1))
 !
          IF (NFAL.GT.0 .AND. IFAL(NFAL).EQ.II) THEN
 !
@@ -8832,7 +9282,7 @@
          IF (AUNITS .EQ. ' ') THEN
             IF (UPCASE(LINE(N:), 4) .EQ. 'MOLE') THEN
                IF (N+4.LE.ILASCH(LINE) .AND. &
-                          UPCASE(LINE(N+4:),1).EQ.'!') THEN
+                          UPCASE(LINE(N+4:),1).EQ.'C') THEN
 !
                   AUNITS = 'MOLC'
                   IF (IUNITS .EQ. ' ') THEN
@@ -8893,6 +9343,7 @@
       module chemkin_kiva
 
       use working_precision, only: dp
+      use chemistry_string_limits, only: species_name_len
 
       implicit none
       public
@@ -8915,11 +9366,11 @@
 !        Chemkin Working arrays (MUST BE DOUBLE PRECISION!)
          integer,           dimension(:,:), allocatable, target :: intwork
          double precision,  dimension(:,:), allocatable, target :: reawork
-         character(len=16), dimension(:,:), allocatable, target :: chawork
+         character(len=species_name_len), dimension(:,:), allocatable, target :: chawork
 
          integer,           dimension(:), allocatable :: ICK
          double precision,  dimension(:), allocatable :: RCK
-         character(len=16), dimension(:), allocatable :: CCK
+         character(len=species_name_len), dimension(:), allocatable :: CCK
 
 !        Chemkin problem arrays (elements, species, reactions, eqs)
          integer :: ckne, ckns, cknr, ckneq

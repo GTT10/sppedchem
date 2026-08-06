@@ -1,0 +1,13 @@
+! Negative-test mechanism: PLOG pressures decrease within a reaction.
+ELEMENTS
+H O N
+END
+SPECIES
+H2 O2 H2O H O OH HO2 H2O2 N2
+END
+REACTIONS
+O + H2  = OH + H         5.060E+04   2.67    6290.0
+H + O2 = HO2             1.000E+12   0.00     500.0
+    PLOG /  1.0   1.000E+12   0.00     500.0 /
+    PLOG /  0.1   2.000E+12   0.00     600.0 /
+END
