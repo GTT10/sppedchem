@@ -63,6 +63,7 @@ SRCS = \
   $(SRCDIR)/radau5.f90 \
   $(SRCDIR)/radaua.f90 \
   $(SRCDIR)/radau_sparse.f90 \
+  $(SRCDIR)/ckintp_preflight.f90 \
   $(SRCDIR)/chemistry_input.f90 \
   $(SRCDIR)/SCbroadcast.f90
 
