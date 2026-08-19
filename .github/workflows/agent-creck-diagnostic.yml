@@ -1,0 +1,63 @@
+name: Agent CRECK parser diagnostic
+
+on:
+  push:
+    branches:
+      - agent/creck-capacity-fix
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate capacity and parser failure paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          roots = [Path('src'), Path('test'), Path('scripts')]
+          files = [Path('Makefile'), Path('fpm.toml')]
+          for root in roots:
+              if root.exists():
+                  files.extend(p for p in root.rglob('*') if p.is_file())
+
+          patterns = [
+              re.compile(r'IDIM', re.I),
+              re.compile(r'MAXSP', re.I),
+              re.compile(r'more\s+than.*reaction', re.I),
+              re.compile(r'PLOG\s+pressures', re.I),
+              re.compile(r'CKINTP', re.I),
+              re.compile(r'cklink', re.I),
+          ]
+
+          for path in sorted(set(files)):
+              try:
+                  lines = path.read_text(errors='replace').splitlines()
+              except Exception:
+                  continue
+              hits = []
+              for i, line in enumerate(lines):
+                  if any(pattern.search(line) for pattern in patterns):
+                      hits.append(i)
+              if not hits:
+                  continue
+              print(f'===== {path} =====')
+              shown = set()
+              for hit in hits:
+                  start = max(0, hit - 10)
+                  end = min(len(lines), hit + 11)
+                  key = (start, end)
+                  if key in shown:
+                      continue
+                  shown.add(key)
+                  print(f'--- lines {start + 1}-{end} ---')
+                  for j in range(start, end):
+                      print(f'{j + 1:6d}: {lines[j]}')
+          PY
