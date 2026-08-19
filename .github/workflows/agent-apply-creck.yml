@@ -1,0 +1,34 @@
+name: Temporary CRECK source apply
+
+on:
+  push:
+    branches:
+      - agent/creck-capacity-fix
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/creck-capacity-fix
+
+      - name: Apply source patch
+        run: python3 scripts/agent_apply_creck_fix.py
+
+      - name: Commit patch result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/chemkin_module.f90 agent-fix-error.txt 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No patch result was produced" >&2
+            exit 1
+          fi
+          git commit -m "Fail closed on CKINTP reaction-capacity overflow"
+          git push
