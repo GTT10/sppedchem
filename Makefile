@@ -109,6 +109,7 @@ test-plog:
 	./scripts/run_plog_tests.sh
 	./scripts/run_plog_eval_tests.sh
 	./scripts/run_neg_tests.sh
+	bash ./scripts/run_capacity_tests.sh
 
 test-lifecycle:
 	./scripts/run_reload_tests.sh
