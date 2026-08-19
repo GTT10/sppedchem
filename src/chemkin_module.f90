@@ -6935,8 +6935,15 @@
                             IWL, WL, NRNU, IRNU, RNU, KERR)
 !
             ELSE
-               WRITE (LOUT, 1070)
-               KERR = .TRUE.
+!              Fail immediately. Continuing with II pinned at IDIM makes
+!              auxiliary records from later reactions attach to reaction
+!              IDIM and can replace this primary error with a false PLOG
+!              ordering diagnostic.
+               WRITE (*,1070) IDIM
+               WRITE (LOUT,1070) IDIM
+               CLOSE (LIN)
+               CLOSE (LOUT)
+               ERROR STOP 1
             ENDIF
 !
          ENDIF
@@ -6999,33 +7006,35 @@
 !
       CLOSE (LIN)
 !
-!     OPEN LINKING FILE
+!     Preserve the primary parser diagnostic. Do not run PLOG validation
+!     and do not create a linking file when an earlier parse check failed.
+      IF (KERR) THEN
+         WRITE (LOUT, '(//A)')&
+         ' ERROR...MECHANISM PARSING FAILED; NO LINKING FILE WAS WRITTEN'
+         CLOSE (LOUT)
+         ERROR STOP 1
+      ENDIF
 !
-!ck2015      OPEN (LINC, FORM='UNFORMATTED', STATUS='UNKNOWN',&
-!ck2015                  FILE='cklink')
-      OPEN (LINC, FORM='UNFORMATTED', STATUS='UNKNOWN',&
-                  FILE=trim(mechdir)//"cklink")
-
-      REWIND LINC
-!     cklink v2: pack the collected PLOG lines into per-reaction arrays
-!     and enforce non-decreasing pressure order. A violation sets KERR,
-!     so the gate below writes only a truncated (magic+header) cklink
-!     and exits non-zero.
+!     Validate and pack PLOG data before opening cklink. plog_finalize uses
+!     ERROR STOP for malformed data, so no partial link exists on failure.
       CALL plog_finalize(KERR, LOUT)
+      IF (KERR) THEN
+         WRITE (LOUT, '(//A)')&
+         ' ERROR...PLOG VALIDATION FAILED; NO LINKING FILE WAS WRITTEN'
+         CLOSE (LOUT)
+         ERROR STOP 1
+      ENDIF
+!
+!     Create the link only after all parse-time validation succeeds.
+      OPEN (LINC, FORM='UNFORMATTED', STATUS='REPLACE',&
+                  FILE=trim(mechdir)//"cklink")
+      REWIND LINC
 !     v2 leading record: magic + integer schema version. Positively
 !     identifies the format for the reader (SCcklink) — supersedes the
 !     fragile VERS-string check.
       WRITE (LINC) CK_MAGIC, CK_SCHEMA
       WRITE (LINC) VERS, PREC, KERR
 
-!
-      IF (KERR) THEN
-         WRITE (LOUT, '(//A)')&
-         ' WARNING...THERE IS AN ERROR IN THE LINKING FILE'
-         CLOSE (LINC)
-         CLOSE (LOUT)
-         ERROR STOP 1
-      ENDIF
 !
       DO 1150 K = 1, KK
          IF (KCHRG(K) .NE. 0) NCHRG = NCHRG+1
@@ -7161,7 +7170,8 @@
   400 FORMAT (25X,I3,'. ',A4,G15.6)
 !
  1000 FORMAT (6X,'Error...no atomic weight for element ',A)
- 1070 FORMAT (6X,'Error...more than IDIM reactions...')
+ 1070 FORMAT (6X,'ERROR...reaction count exceeds CKINTP capacity IDIM=',&
+                   I0,'. Aborting before auxiliary/PLOG parsing.')
  1095 FORMAT (6X,'Error...no duplicate declared for reaction no.',I3)
  1800 FORMAT (///54X, '(k = A T**b exp(-E/RT))',/,&
               6X,'REACTIONS CONSIDERED',30X,'A',8X,'b',8X,'E',/)
