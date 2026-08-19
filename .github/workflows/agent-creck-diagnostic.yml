@@ -16,48 +16,44 @@ jobs:
         with:
           ref: agent/creck-capacity-fix
 
-      - name: Locate capacity and parser failure paths
+      - name: Locate exact capacity and failure paths
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY' > agent-diagnostic.txt
+          python3 - <<'PY' > agent-targets.txt
           from pathlib import Path
           import re
 
-          roots = [Path('src'), Path('test'), Path('scripts')]
-          files = [Path('Makefile'), Path('fpm.toml')]
-          for root in roots:
-              if root.exists():
-                  files.extend(p for p in root.rglob('*') if p.is_file())
-
           patterns = [
-              re.compile(r'IDIM', re.I),
-              re.compile(r'MAXSP', re.I),
+              re.compile(r'\bIDIM\b', re.I),
+              re.compile(r'\bMAXSP\b', re.I),
               re.compile(r'more\s+than.*reaction', re.I),
               re.compile(r'PLOG\s+pressures', re.I),
-              re.compile(r'CKINTP', re.I),
-              re.compile(r'cklink', re.I),
+              re.compile(r'pressures\s+for\s+reaction', re.I),
+              re.compile(r'reaction.*capacity', re.I),
           ]
 
-          for path in sorted(set(files)):
+          for path in sorted(Path('src').rglob('*')):
+              if not path.is_file():
+                  continue
               try:
                   lines = path.read_text(errors='replace').splitlines()
               except Exception:
                   continue
-              hits = []
-              for i, line in enumerate(lines):
-                  if any(pattern.search(line) for pattern in patterns):
-                      hits.append(i)
+              hits = [i for i, line in enumerate(lines)
+                      if any(pattern.search(line) for pattern in patterns)]
               if not hits:
                   continue
-              print(f'===== {path} =====')
-              covered = set()
+              intervals = []
               for hit in hits:
-                  start = max(0, hit - 14)
-                  end = min(len(lines), hit + 15)
-                  if any(start >= a and end <= b for a, b in covered):
-                      continue
-                  covered.add((start, end))
+                  start = max(0, hit - 18)
+                  end = min(len(lines), hit + 19)
+                  if intervals and start <= intervals[-1][1]:
+                      intervals[-1] = (intervals[-1][0], max(intervals[-1][1], end))
+                  else:
+                      intervals.append((start, end))
+              print(f'===== {path} =====')
+              for start, end in intervals:
                   print(f'--- lines {start + 1}-{end} ---')
                   for j in range(start, end):
                       print(f'{j + 1:6d}: {lines[j]}')
@@ -67,11 +63,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- agent-diagnostic.txt && git ls-files --error-unmatch agent-diagnostic.txt >/dev/null 2>&1; then
+          if git diff --quiet -- agent-targets.txt && git ls-files --error-unmatch agent-targets.txt >/dev/null 2>&1; then
             exit 0
           fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add agent-diagnostic.txt
-          git commit -m "Record CRECK parser diagnostics"
+          git add agent-targets.txt
+          git commit -m "Record focused CRECK parser diagnostics"
           git push
