@@ -1,4 +1,4 @@
-name: Agent CRECK parser diagnostic
+name: Apply CRECK capacity fix
 
 on:
   push:
@@ -9,65 +9,194 @@ permissions:
   contents: write
 
 jobs:
-  diagnose:
+  apply:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/creck-capacity-fix
 
-      - name: Locate exact capacity and failure paths
+      - name: Patch parser and regression harness
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY' > agent-targets.txt
+          python3 - <<'PY'
           from pathlib import Path
-          import re
 
-          patterns = [
-              re.compile(r'\bIDIM\b', re.I),
-              re.compile(r'\bMAXSP\b', re.I),
-              re.compile(r'more\s+than.*reaction', re.I),
-              re.compile(r'PLOG\s+pressures', re.I),
-              re.compile(r'pressures\s+for\s+reaction', re.I),
-              re.compile(r'reaction.*capacity', re.I),
-          ]
+          source_path = Path('src/chemkin_module.f90')
+          source = source_path.read_text()
 
-          for path in sorted(Path('src').rglob('*')):
-              if not path.is_file():
-                  continue
-              try:
-                  lines = path.read_text(errors='replace').splitlines()
-              except Exception:
-                  continue
-              hits = [i for i, line in enumerate(lines)
-                      if any(pattern.search(line) for pattern in patterns)]
-              if not hits:
-                  continue
-              intervals = []
-              for hit in hits:
-                  start = max(0, hit - 18)
-                  end = min(len(lines), hit + 19)
-                  if intervals and start <= intervals[-1][1]:
-                      intervals[-1] = (intervals[-1][0], max(intervals[-1][1], end))
-                  else:
-                      intervals.append((start, end))
-              print(f'===== {path} =====')
-              for start, end in intervals:
-                  print(f'--- lines {start + 1}-{end} ---')
-                  for j in range(start, end):
-                      print(f'{j + 1:6d}: {lines[j]}')
+          old = """      CALL plog_reset
+      WRITE  (LOUT, 15) VERS(:4)
+"""
+          new = """      CALL plog_reset
+!     Remove any stale link before interpreting a new mechanism. A failed
+!     parse must not leave an older cklink that can be mistaken for current
+!     output by an embedding application.
+      OPEN (LINC, FORM='UNFORMATTED', STATUS='REPLACE',&
+                  FILE=trim(mechdir)//\"cklink\")
+      CLOSE (LINC, STATUS='DELETE')
+      WRITE  (LOUT, 15) VERS(:4)
+"""
+          assert source.count(old) == 1, 'plog_reset insertion point changed'
+          source = source.replace(old, new, 1)
+
+          old = """            ELSE
+               WRITE (LOUT, 1070)
+               KERR = .TRUE.
+            ENDIF
+"""
+          new = """            ELSE
+!              Fail immediately. Continuing with II pinned at IDIM makes
+!              auxiliary records from later reactions attach to reaction
+!              IDIM and can replace this primary error with a false PLOG
+!              ordering diagnostic.
+               WRITE (*,1070) IDIM
+               WRITE (LOUT,1070) IDIM
+               CLOSE (LIN)
+               CLOSE (LOUT)
+               ERROR STOP 1
+            ENDIF
+"""
+          assert source.count(old) == 1, 'reaction overflow block changed'
+          source = source.replace(old, new, 1)
+
+          start_marker = """      CLOSE (LIN)
+!
+!     OPEN LINKING FILE
+"""
+          end_marker = """      DO 1150 K = 1, KK
+"""
+          start = source.index(start_marker)
+          end = source.index(end_marker, start)
+          replacement = """      CLOSE (LIN)
+!
+!     Preserve the primary parser diagnostic. Do not run PLOG validation
+!     and do not create a linking file when an earlier parse check failed.
+      IF (KERR) THEN
+         WRITE (LOUT, '(//A)')&
+         ' ERROR...MECHANISM PARSING FAILED; NO LINKING FILE WAS WRITTEN'
+         CLOSE (LOUT)
+         ERROR STOP 1
+      ENDIF
+!
+!     Validate and pack PLOG data before opening cklink. plog_finalize uses
+!     ERROR STOP for malformed data, so no partial link exists on failure.
+      CALL plog_finalize(KERR, LOUT)
+      IF (KERR) THEN
+         WRITE (LOUT, '(//A)')&
+         ' ERROR...PLOG VALIDATION FAILED; NO LINKING FILE WAS WRITTEN'
+         CLOSE (LOUT)
+         ERROR STOP 1
+      ENDIF
+!
+!     Create the link only after all parse-time validation succeeds.
+      OPEN (LINC, FORM='UNFORMATTED', STATUS='REPLACE',&
+                  FILE=trim(mechdir)//\"cklink\")
+      REWIND LINC
+!     v2 leading record: magic + integer schema version. Positively
+!     identifies the format for the reader (SCcklink) — supersedes the
+!     fragile VERS-string check.
+      WRITE (LINC) CK_MAGIC, CK_SCHEMA
+      WRITE (LINC) VERS, PREC, KERR
+
+!
+"""
+          source = source[:start] + replacement + source[end:]
+
+          old = """ 1070 FORMAT (6X,'Error...more than IDIM reactions...')
+"""
+          new = """ 1070 FORMAT (6X,'ERROR...reaction count exceeds CKINTP capacity IDIM=',&
+                   I0,'. Aborting before auxiliary/PLOG parsing.')
+"""
+          assert source.count(old) == 1, 'format 1070 changed'
+          source = source.replace(old, new, 1)
+          source_path.write_text(source)
+
+          test_path = Path('scripts/run_neg_tests.sh')
+          tests = test_path.read_text()
+          marker = """done
+
+echo \"======================================================================\"
+"""
+          addition = r'''done
+
+# Generated boundary case: reaction 9001 must fail at the fixed IDIM=9000
+# capacity before any following auxiliary/PLOG line can be associated with
+# reaction 9000. Seed a stale cklink to verify fail-closed invalidation.
+echo "  case: generated reaction-count overflow"
+capacity_dir="$tmp_root/reaction_capacity"
+mkdir -p "$capacity_dir"
+cat > "$capacity_dir/chem.inp" <<'EOF'
+ELEMENTS
+H O
+END
+SPECIES
+H2 H O OH
+END
+REACTIONS CAL/MOLE
+EOF
+for ((i=1; i<=9001; i++)); do
+  printf '%s\n' 'H2+O=H+OH  1.000E+13  0.0  0.0' >> "$capacity_dir/chem.inp"
+done
+printf '%s\n' 'END' >> "$capacity_dir/chem.inp"
+cp "$root_dir/test/data_plog/therm.dat" "$capacity_dir/therm.dat"
+printf '%s\n' 'stale-link-sentinel' > "$capacity_dir/cklink"
+
+set +e
+out=$(SC_MECHDIR="$capacity_dir/" "$DRV_BIN" 2>&1)
+rc=$?
+set -e
+
+ok=1
+want="reaction count exceeds CKINTP capacity IDIM=9000"
+if [[ $rc -eq 0 ]]; then
+  echo "    FAIL: driver exited 0 after exceeding IDIM"
+  ok=0
+fi
+if ! grep -qF "$want" <<<"$out"; then
+  echo "    FAIL: primary reaction-capacity diagnostic not found"
+  ok=0
+fi
+if grep -qF "PLOG pressures for reaction" <<<"$out"; then
+  echo "    FAIL: secondary PLOG-order diagnostic masked the capacity error"
+  ok=0
+fi
+if [[ -e "$capacity_dir/cklink" ]]; then
+  echo "    FAIL: cklink exists after failed parse"
+  ok=0
+fi
+
+if [[ $ok -eq 1 ]]; then
+  echo "    PASS: overflow refused before PLOG parsing; no cklink remains"
+else
+  echo "    --- driver output ---"
+  sed 's/^/    | /' <<<"$out"
+  fails=$((fails+1))
+fi
+
+echo "======================================================================"
+'''
+          assert tests.count(marker) == 1, 'negative-test insertion point changed'
+          tests = tests.replace(marker, addition, 1)
+          test_path.write_text(tests)
+
+          for path in (
+              Path('agent-diagnostic.txt'),
+              Path('agent-targets.txt'),
+              Path('.github/workflows/agent-creck-diagnostic.yml'),
+          ):
+              path.unlink(missing_ok=True)
           PY
 
-      - name: Commit diagnostic output
+          git diff --check
+
+      - name: Commit fix
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- agent-targets.txt && git ls-files --error-unmatch agent-targets.txt >/dev/null 2>&1; then
-            exit 0
-          fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add agent-targets.txt
-          git commit -m "Record focused CRECK parser diagnostics"
+          git add -A
+          git commit -m "Fail closed on CKINTP reaction-capacity overflow"
           git push
