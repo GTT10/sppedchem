@@ -1,28 +1,10 @@
 from pathlib import Path
 import re
-import traceback
-
-ERROR_FILE = Path("agent-fix-error.txt")
 
 
 def apply() -> None:
     source_path = Path("src/chemkin_module.f90")
     source = source_path.read_text()
-
-    if "Remove any stale link before interpreting a new mechanism" not in source:
-        needle = "      CALL plog_reset\n      WRITE  (LOUT, 15) VERS(:4)\n"
-        replacement = """      CALL plog_reset
-!     Remove any stale link before interpreting a new mechanism. A failed
-!     parse must not leave an older cklink that can be mistaken for current
-!     output by an embedding application.
-      OPEN (LINC, FORM='UNFORMATTED', STATUS='REPLACE',&
-                  FILE=trim(mechdir)//"cklink")
-      CLOSE (LINC, STATUS='DELETE')
-      WRITE  (LOUT, 15) VERS(:4)
-"""
-        if source.count(needle) != 1:
-            raise RuntimeError(f"plog_reset insertion points: {source.count(needle)}")
-        source = source.replace(needle, replacement, 1)
 
     if "Continuing with II pinned at IDIM" not in source:
         pattern = re.compile(
@@ -100,8 +82,4 @@ def apply() -> None:
     source_path.write_text(source)
 
 
-try:
-    apply()
-    ERROR_FILE.unlink(missing_ok=True)
-except Exception:
-    ERROR_FILE.write_text(traceback.format_exc())
+apply()
