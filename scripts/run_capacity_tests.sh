@@ -59,7 +59,6 @@ END
 EOF
 
 cp "$root_dir/test/data_plog/therm.dat" "$mechdir/therm.dat"
-printf '%s\n' 'stale-link-sentinel' > "$mechdir/cklink"
 
 set +e
 out=$(SC_MECHDIR="$mechdir/" "$DRV_BIN" 2>&1)
