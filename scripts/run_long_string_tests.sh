@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Regression test for the CHEMKIN/NASA-7 string boundaries:
-# 18-character species identifiers and mechanism records longer than 80 chars.
+# Compact short-name NASA headers, 18-character species identifiers,
+# and mechanism records longer than 80 chars.
 
 set -euo pipefail
 
