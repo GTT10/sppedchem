@@ -439,7 +439,7 @@ contains
 
          else
 
-            ! Matrix already contains that row
+            ! Replace this row and preserve all subsequent rows.
 
             ! Gather current number of row elements
             irow_first = matrix%IA(irow)
@@ -448,7 +448,7 @@ contains
             ! Add a row to that matrix(updates all matrix% values)
             call allocate(matrix%nr,&
             &max(matrix%nc,maxval(eff_jcol)),&
-            &matrix%n + eff_n, matrix)
+            &matrix%n + eff_n - (irow_last - irow_first + 1), matrix)
 
             ! 1) Previous lines
             matrix%A (1:irow_first-1) =  Atmp(1:irow_first-1)
@@ -462,8 +462,8 @@ contains
             matrix%IA(irow+1) = matrix%IA(irow) + eff_n
 
             ! 3) Remaining lines
-            matrix%A(irow_last_new+1:matrix%n )= Atmp(irow_first:)
-            matrix%JA(irow_last_new+1:matrix%n)=JAtmp(irow_first:)
+            matrix%A(irow_last_new+1:matrix%n )= Atmp(irow_last+1:)
+            matrix%JA(irow_last_new+1:matrix%n)=JAtmp(irow_last+1:)
 
             matrix%IA(irow+2:matrix%nr+1) =&
             &IAtmp(irow+2:matrix%nr+1) + eff_n&

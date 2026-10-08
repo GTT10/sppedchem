@@ -2194,6 +2194,7 @@
 
       SUBROUTINE CKINIT (LENIWK, LENRWK, LENCWK, LINC, LOUT, ICKWRK,  &
                          RCKWRK, CCKWRK)
+      USE universal_constants, ONLY: Rerg, Rcal, Patm
 !     Reads the linking file and creates the internal work arrays
 !     ICKWRK, CCKWRK, and RCKWORK.  CKINIT must be called before any
 !     other CHEMKIN subroutine is called.  The work arrays must then
@@ -2228,7 +2229,9 @@
       CHARACTER CCKWRK(*)*(*)
       LOGICAL IOK, ROK, COK
 
-      DATA RU,RUC,PA /8.314E7, 1.987, 1.01325E6/
+      RU = Rerg
+      RUC = Rcal
+      PA = 10.0D0*Patm
 
       SMALL = 10.0D0**(-300)
       BIG   = 10.0D0**(+300)
@@ -8767,9 +8770,10 @@
 !      6.0221367(39) mol-1 )
 !
       USE plog_collect, only: plog_apply_efac, plog_apply_afac
+      USE universal_constants, only: RU_JOUL => R, cal_to_joule, kcal_to_joule
       IMPLICIT DOUBLE PRECISION (A-H,O-Z), INTEGER (I-N)
-      DOUBLE PRECISION RU_JOUL,        AVAG,                ONE
-      PARAMETER (RU_JOUL = 8.3140D0, AVAG = 6.0221367D23, ONE=1.0D0)
+      DOUBLE PRECISION AVAG, ONE
+      PARAMETER (AVAG = 6.0221367D23, ONE=1.0D0)
 
       DIMENSION NSPEC(*), PAR(NPAR,*), RPAR(NPAR,*), NREAC(*),      &
                 NUNK(MAXSP,*), NU(MAXSP,*), KCHRG(*), KNCF(MDIM,*), &
@@ -8847,17 +8851,17 @@
          EFAC = 1.0
       ELSEIF (EUNITS .EQ. 'CAL/') THEN
 !        convert E from cal/mole to Kelvin
-         EFAC = 4.184  / RU_JOUL
+         EFAC = cal_to_joule / RU_JOUL
       ELSEIF (EUNITS .EQ. 'KCAL') THEN
 !        convert E from kcal/mole to Kelvin
-         EFAC = 4184.0 / RU_JOUL
+         EFAC = kcal_to_joule / RU_JOUL
       ELSEIF (EUNITS .EQ. 'JOUL') THEN
 !        convert E from Joules/mole to Kelvin
-         EFAC = 1.00  / RU_JOUL
+         EFAC = 1.0D0 / RU_JOUL
       ELSEIF (EUNITS .EQ. 'KJOU') THEN
 !        convert E from Kjoules/mole to Kelvin
 !        1 kJ/mol = 1000 J/mol (was erroneously 4000.0, a 4x error in E/R)
-         EFAC = 1000.0 / RU_JOUL
+         EFAC = 1000.0D0 / RU_JOUL
       ENDIF
       PAR(3,II) = PAR(3,II) * EFAC
 !
