@@ -37,6 +37,10 @@ terms are summed before log-pressure interpolation; pressures outside the table
 use the nearest endpoint. PLOG combined with explicit `REV`, third-body/falloff,
 `FORD/RORD`, or non-integer stoichiometry is rejected.
 
+Activation energies use a shared gas constant (`8.31446261815324 J/mol/K`)
+and `4.184 J/cal`. Regenerate `cklink` after updating from older versions;
+these corrections change rates relative to the old inconsistent conversions.
+
 The analytical Jacobian includes pressure dependence through temperature and
 composition. PLOG disables simplified sparsity. Call `chemistry_finalize`
 before loading another mechanism in the same process.
@@ -49,9 +53,11 @@ The `cklink` magic is `SCLKv2  ` and its current schema is 3. Change both
 | Target | Coverage |
 | --- | --- |
 | `make test-smoke` | Bundled PRF ignition |
+| `make test-sparse` | Sparse row replacement and subsequent collider columns |
+| `make test-constants` | Energy conversions in five units and explicit zero efficiencies |
 | `make test-plog` | Parse/cklink, rates, RHS, Jacobian, integration, MPI, rejected inputs, capacity |
 | `make test-lifecycle` | Mechanism reload and compact/full-width string handling |
-| `make test` | Smoke, PLOG, and lifecycle tests |
+| `make test` | Smoke, sparse, constants, PLOG, and lifecycle tests |
 | `make test-openmp` | Isolated bounds-checking build and two-thread reload |
 | `make test-all` | All bundled tests |
 | `make test-real-plog` | Pinned public C3Mech comparison with Cantera 3.2 |

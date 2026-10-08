@@ -105,6 +105,13 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.f90 | $(BUILDDIR) $(MODULEDIR)
 test-smoke:
 	./scripts/run_tests.sh
 
+test-sparse:
+	./scripts/run_sparse_tests.sh
+
+test-constants:
+	$(MAKE) all
+	python3 scripts/run_constants_zero_tests.py --library-root .
+
 test-plog:
 	./scripts/run_plog_tests.sh
 	./scripts/run_plog_eval_tests.sh
@@ -120,6 +127,8 @@ test-openmp:
 
 test:
 	$(MAKE) test-smoke
+	$(MAKE) test-sparse
+	$(MAKE) test-constants
 	$(MAKE) test-plog
 	$(MAKE) test-lifecycle
 
@@ -134,4 +143,4 @@ test-real-plog:
 clean:
 	rm -rf $(OUTDIR)
 
-.PHONY: all clean test-smoke test-plog test-lifecycle test-openmp test test-all test-real-plog
+.PHONY: all clean test-constants test-sparse test-smoke test-plog test-lifecycle test-openmp test test-all test-real-plog

@@ -88,18 +88,9 @@
                                   tb_beta_sp
 
       use sparse_algebra
-      use universal_constants, only: zero, one, R, joule_to_cal
-
-
-!     Note: for consistency with the CHEMKIN the universal gas
-!           constant in calorie units has been taken to be
-!           1.987 cal / mol / K instead than the exact value
-!      use universal_constants, only: Rcal
+      use universal_constants, only: zero, one, R, Rcal, joule_to_cal
 
       implicit none
-
-      real (dp)        :: Rcal!, parameter :: Rcal = 1.987d0
-
 
 !     ** Variable declaration *****************************************
 
@@ -194,6 +185,7 @@
       real (8)        , dimension(:,:), allocatable :: tmptemp, tmprea
       real (8)        , dimension(:,:), allocatable :: tmpfar, tmpmol
       real (dp)       , dimension(:,:), allocatable :: third_body_dense
+      real (dp)       , dimension(:), allocatable :: efficiency_row
 
       type(sparseint)                               :: tmp_isp
 
@@ -203,14 +195,6 @@
       cklink = trim(mechdir)//"cklink"
       cklin2 = trim(mechdir)//"chem.bin"
       output = trim(mechdir)//"SpeedCHEM.out"
-!     Set physical gas constant
-!     [FP] For compatibility with different versions of the CHEMKIN
-!     reaction mechanism interpreter, one might use the approximate
-!     Rcal = 1.987 kcal/mol/K value instead than the more accurate
-!     ratio between the gas constant and the conversion factor
-!      Rcal = 8.314_dp/4.184_dp
-      Rcal = 1.987_dp
-
 !     ** Open output file for mechanism processing
       open(unit=lout,file=output,status='unknown')
 
@@ -916,19 +900,24 @@
                          i = 1, nthb )
 
 !          Assign third-body reaction data
+           allocate(efficiency_row(ns))
            tb_assign: do i = 1, nthb
 
 !               third_body(ire(i),:) = 1e0_dp
 
-               call add_line(third_body_sp,ire(i),[(one,j=1,ns)])
+!              Preserve explicit zero efficiencies before sparse insertion.
+!              add_value skips zero and cannot overwrite the default one.
+               efficiency_row = one
 
                if (inthb(i) > 0) then
                   do j = 1, inthb(i)
-                     call add_value(third_body_sp,ire(i),itmpsp(j,i),real(tmpmol(j,i), dp))
+                     efficiency_row(itmpsp(j,i)) = real(tmpmol(j,i), dp)
                   end do
                endif
+               call add_line(third_body_sp,ire(i),efficiency_row)
 
            end do tb_assign
+           deallocate(efficiency_row)
 
 !          Logical mask of third-body reactions
            THREE(ire) = .true.
