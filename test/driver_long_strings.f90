@@ -2,7 +2,7 @@ program driver_long_strings
    use mpi
    use chemistry_string_limits, only: species_name_len
    use chemistry_setup, only: mechdir, use_speedchem
-   use speedchem, only: ns, nr, specie
+   use speedchem, only: ns, nr, specie, SCMW
    use sparse_chemistry, only: stoich_r_sp, stoich_p_sp
    implicit none
 
@@ -35,6 +35,14 @@ program driver_long_strings
    if (species_name_len /= 18 .or. len(specie) /= species_name_len) local_fail = 1
    if (ns /= nlong + 1 .or. nr /= 1) local_fail = 1
    if (stoich_r_sp%n /= 3 .or. stoich_p_sp%n /= 3) local_fail = 1
+   found = .false.
+   do j = 1, ns
+      if (trim(specie(j)) /= 'O2') cycle
+      found = .true.
+      ! The legacy link stores molecular weights at single precision.
+      if (abs(SCMW(j)-31.9988d0) > 1.0d-5) local_fail = 1
+   enddo
+   if (.not. found) local_fail = 1
 
    do i = 1, nlong
       found = .false.
@@ -56,7 +64,7 @@ program driver_long_strings
    endif
 
    if (rank == 0) write(*,'(a,i0,a)') &
-      'RESULT: PASS - 18-character species and >80-character records on ', &
+      'RESULT: PASS - compact NASA headers, 18-character species and >80-character records on ', &
       nproc, ' MPI rank(s)'
    call MPI_Finalize(ierr)
 end program driver_long_strings
