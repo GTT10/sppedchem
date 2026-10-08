@@ -32,7 +32,7 @@ FFLAGS = -c \
   -module $(MODULEDIR) \
   -O2
 
-# Canonical compile order (mirrors scripts/ifx.sh).
+# Canonical compile order; this is the only maintained source list.
 # working_precision must come first so modules that `use working_precision`
 # find the .mod. A strict serial sequence keeps intra-module dependencies
 # satisfied — the Makefile should be invoked with -j1.
