@@ -31,7 +31,7 @@ python -m pip install "cantera==3.2.0"
 make test-real-plog
 ```
 
-See [testing details](docs/testing.md) and [supported reaction forms](CLAUDE.md#plog-support--cklink-v2).
+See [testing details](docs/development.md#testing) and [supported input](docs/development.md#supported-input).
 Unsupported forms are rejected.
 
 ## Use
@@ -41,7 +41,7 @@ Unsupported forms are rejected.
 3. Call `chemistry_ODE_integrate` for constant-volume integration.
 4. Call `chemistry_finalize` before loading another mechanism.
 
-Examples: [test drivers](test/). Internals: [CLAUDE.md](CLAUDE.md).
+Examples: [test drivers](test/). Internals: [development guide](docs/development.md).
 
 ## Citation and license
 
