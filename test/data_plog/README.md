@@ -36,7 +36,8 @@ here), so no new thermodynamic data is needed.
   more plain Arrhenius.
 - `therm.dat` — copy of the PRF thermo database.
 - `plog_expected.txt` — **golden** canonical dump. `scripts/run_plog_tests.sh`
-  regenerates the dump and diffs it against this file.
+  regenerates the dump and diffs it against this file. Energy entries use
+  `E * (4.184 / 8.31446261815324)` for the CAL/MOLE input.
 
 Generated outputs (`cklink`, `chem.bin`, `SpeedCHEM.*`, `dat.*`,
 `chem.out`) are git-ignored.

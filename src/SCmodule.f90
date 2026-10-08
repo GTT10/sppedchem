@@ -1490,7 +1490,7 @@ module universal_constants
 !     ** Physical constants ********************************************
 
 !     Universal gas constant [J / mol K]
-   real (dp)       , parameter :: R         = 8.31446210000000_dp
+   real (dp)       , parameter :: R         = 8.31446261815324_dp
    real (dp)       , parameter :: uR        = one/R
 
 !     Universal gas constant, calorie units [cal / mol K]
