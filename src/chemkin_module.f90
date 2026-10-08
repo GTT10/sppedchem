@@ -7435,6 +7435,10 @@
 !     that fixed field supports a full 18-character name even when the
 !     date field starts immediately in column 19 with no separating blank.
       CALL CKCOMP (ISTR(:species_name_len), KNAME, KK, K)
+!     Older thermo files put a short identifier and date/comment in that
+!     field. Retain the historical token match when the full field fails;
+!     never truncate the token, which could match an unrelated species.
+      IF (K.LE.0) CALL CKCOMP (SUB(1), KNAME, KK, K)
 !
       IF (K.LE.0)  GO TO 10
       IF (ITHRM(K)) GO TO 10
