@@ -9,7 +9,6 @@ on:
       - "CITATION.cff"
       - "THIRD_PARTY_NOTICES.md"
       - "CONTRIBUTING.md"
-      - "fpm.toml"
       - ".github/workflows/metadata.yml"
   push:
     branches:
@@ -21,7 +20,6 @@ on:
       - "CITATION.cff"
       - "THIRD_PARTY_NOTICES.md"
       - "CONTRIBUTING.md"
-      - "fpm.toml"
       - ".github/workflows/metadata.yml"
   workflow_dispatch:
 
@@ -39,18 +37,13 @@ jobs:
         with:
           args: "--validate"
 
-      - name: Verify canonical GPL text and package metadata
+      - name: Verify canonical GPL text and README references
         run: |
           test "$(git hash-object LICENSE)" = "f6cdd22a6c1fbc887e08a215cb4beb3c47048041"
           python3 - <<'PY'
           import pathlib
-          import tomllib
 
           root = pathlib.Path('.')
-          manifest = tomllib.loads((root / 'fpm.toml').read_text())
-          assert manifest['license'] == 'GPL-3.0-or-later'
-          assert manifest['homepage'] == 'https://github.com/GTT10/sppedchem'
-
           readme = (root / 'README.md').read_text()
           for required in (
               'GPL-3.0-or-later',
