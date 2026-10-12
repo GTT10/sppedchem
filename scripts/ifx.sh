@@ -11,25 +11,11 @@ if [[ "$log_file" != /* ]]; then
 fi
 mkdir -p -- "$(dirname -- "$log_file")"
 
-fcflags=(
-  -c
-  -m64
-  -extend-source 132
-  -convert big_endian
-  -warn uninitialized
-  -g
-  -O3
-  -xHost
-  -fno-omit-frame-pointer
-  -traceback
-  -module ifx/mod
-)
-
-printf 'Building SpeedCHEM with %s...\n' "${FC:-mpiifx}"
+printf 'Building SpeedCHEM...\n'
 
 # Rebuild all objects so a previous build cannot retain different flags.
-# The Makefile supplies the source list and module dependency order.
-make -B all "FC=${FC:-mpiifx}" "FFLAGS=${fcflags[*]}" "$@" \
+# The Makefile supplies compiler options, sources, and module dependency order.
+make -B all "$@" \
   2>&1 | tee "$log_file"
 
 printf 'Build finished successfully (log: %s).\n' "$log_file"

@@ -68,14 +68,12 @@ Outputs are `ifx/libSpeedCHEM64.a` and `ifx/mod/*.mod`.
 The Makefile lists sources in module dependency order and serializes
 compilation even with `make -j`.
 
-For an optimized build with debug symbols and a saved compilation log:
+To rebuild with the same Makefile settings and save a compilation log:
 
     ./scripts/ifx.sh
 
-The script rebuilds through the Makefile using `-O3`, `-xHost`, and
-big-endian binary I/O. The library is optimized for the build host's CPU;
-regenerate `cklink` when switching from a build with different byte order.
 The log is saved to `ifx/compile_ifx.log` (`LOG_FILE` can override it).
+Additional make arguments can be passed to the script.
 
 ## Source layout
 
