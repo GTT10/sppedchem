@@ -21,13 +21,12 @@
 .vscode/
 .idea/
 
-# ---- Core dumps (scripts enable -fdump-core) ----
+# ---- Core dumps ----
 core
 core.*
 
 # ---- SpeedCHEM run outputs written into the mechanism dir (mechdir) ----
-# The interpreter/setup emit these next to chem.inp/therm.dat. Keep only the
-# inputs under test/data/ tracked; ignore everything the run generates there.
+# The interpreter/setup emit these next to chem.inp/therm.dat.
 cklink
 chem.bin
 chem.out
@@ -38,10 +37,6 @@ dat.cheminp
 dat.cktherm
 dat.mechanism
 dat.janafwarn
-driver_smoke
-driver_plog
-driver_plog_eval
-driver_rhs_probe
 
 # ---- Local planning notes ----
 plan.md

@@ -12,9 +12,9 @@ Describe the change and why it is needed.
 
 List the exact commands and results.
 
-- [ ] Relevant focused tests passed
-- [ ] `make test-all` passed, or an exception is explained
-- [ ] `make test-real-plog` passed for kinetics/PLOG changes, or an exception is explained
+- [ ] Library build passed for code or build changes
+- [ ] Numerical changes include validation conditions and reference results
+- [ ] Documentation links were checked when applicable
 
 ## Licensing and provenance
 

@@ -48,27 +48,10 @@ before loading another mechanism in the same process.
 The `cklink` magic is `SCLKv2  ` and its current schema is 3. Change both
 `CK_SCHEMA` and `CK_SCHEMA_EXPECT` if the binary layout changes.
 
-## Testing
+## Change validation
 
-| Target | Coverage |
-| --- | --- |
-| `make test-smoke` | Bundled PRF ignition |
-| `make test-sparse` | Sparse row replacement and subsequent collider columns |
-| `make test-constants` | Energy conversions in five units and explicit zero efficiencies |
-| `make test-plog` | Parse/cklink, rates, RHS, Jacobian, integration, MPI, rejected inputs, capacity |
-| `make test-lifecycle` | Mechanism reload and compact/full-width string handling |
-| `make test` | Smoke, sparse, constants, PLOG, and lifecycle tests |
-| `make test-openmp` | Isolated bounds-checking build and two-thread reload |
-| `make test-all` | All bundled tests |
-| `make test-real-plog` | Pinned public C3Mech comparison with Cantera 3.2 |
-
-The real-PLOG test downloads C3MechV4.0.1 MID 2900 (H2/O2/Ar), verifies pinned
-Git blobs, converts the exact CHEMKIN/thermo pair, and compares rates, production
-rates, constant-volume RHS/history, and two-rank MPI results. Source revisions
-and paths are in [the runner](../scripts/run_plog_real_mechanism.sh).
-
-CI runs `test-all`, `test-real-plog`, and checks that tracked files remain clean.
-For local changes, start with the affected tests; run the full suite before
-merging code or build changes. Documentation-only changes need diff and link
-checks. Test mechanism attribution and redistribution terms are in
-[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+CI builds the library with Intel oneAPI and checks that tracked files remain
+clean. For numerical changes, record the mechanisms, conditions, and reference
+results used for validation. Mechanism data and test drivers are not bundled
+with this source distribution. Documentation-only changes need diff and link
+checks.

@@ -1,8 +1,9 @@
 # Contributing
 
 Use a focused branch from `master`. Describe the problem, resulting behavior,
-and validation in the pull request; add regression coverage for behavior changes.
-Build, code-map, input-format, and test guidance is in
+and validation in the pull request. For numerical changes, describe the
+mechanisms, conditions, and reference results used for validation.
+Build, code-map, and input-format guidance is in
 [docs/development.md](docs/development.md).
 
 Preserve existing author, copyright, license, and provenance notices. Add

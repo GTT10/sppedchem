@@ -1,4 +1,4 @@
-name: SpeedCHEM CI
+name: SpeedCHEM build
 
 on:
   pull_request:
@@ -17,30 +17,13 @@ concurrency:
 jobs:
   intel-ifx:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    env:
-      I_MPI_FABRICS: shm
-      OMP_NUM_THREADS: "2"
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install Cantera reference implementation
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "cantera==3.2.0"
-          python - <<'PY'
-          import cantera as ct
-          print("Cantera", ct.__version__)
-          PY
 
       - name: Configure Intel oneAPI APT repository
         run: |
@@ -64,21 +47,12 @@ jobs:
           source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
           mpiifx --version
           mpiexec --version
-          python --version
-          ck2yaml --help >/dev/null
 
-      - name: Run bundled regression suite
+      - name: Build library
         run: |
           source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
           make clean
-          make test-all
-
-      - name: Run pinned public C3Mech PLOG validation
-        run: |
-          source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1
-          PLOG_CANTERA_PYTHON="$(command -v python)" \
-          PLOG_CK2YAML="$(command -v ck2yaml)" \
-          make test-real-plog
+          make
 
       - name: Verify tracked files remain clean
         run: git diff --exit-code

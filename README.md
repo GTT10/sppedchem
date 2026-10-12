@@ -28,8 +28,6 @@ the integration routine from your application:
 3. Call `chemistry_ODE_integrate`.
 4. Call `chemistry_finalize` when finished.
 
-See [example drivers](test/) for complete calling examples.
-
 ## About this version
 
 This repository maintains Federico Perini's SpeedCHEM,
@@ -45,7 +43,7 @@ The supplied Makefile uses Intel oneAPI and Intel MPI:
     make
 
 See the [development guide](docs/development.md)
-for build and test details.
+for build details and supported input.
 
 ## References and license
 
@@ -53,5 +51,5 @@ Original project: https://www.federicoperini.info/speedchem
 
 Citation: [CITATION.cff](CITATION.cff)
 SpeedCHEM-authored code: [GPL-3.0-or-later](LICENSE).
-Third-party code and test data retain their own terms; some redistribution
+Third-party code retains its own terms; some redistribution
 permissions remain unresolved. See [third-party notices](THIRD_PARTY_NOTICES.md).
