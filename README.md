@@ -18,6 +18,15 @@ reaction mechanisms.
 See [supported input](#supported-input)
 for supported reaction forms and limitations.
 
+## Theory
+
+- [Governing equations and numerical solvers](docs/theory.md):
+  constant-volume species and energy equations, thermodynamics,
+  reaction rates, stiffness, and analytical Jacobians.
+- [PLOG rates and their derivatives](docs/plog.md):
+  same-pressure summation, logarithmic interpolation, a worked example,
+  and pressure coupling in the constant-volume Jacobian.
+
 ## Usage
 
 Set the mechanism directory, initialize the library, and call
