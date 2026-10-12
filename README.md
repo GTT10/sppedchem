@@ -15,7 +15,7 @@ reaction mechanisms.
 - Pressure-dependent reactions, including PLOG
 - MPI support for mechanism initialization
 
-See [supported input](docs/development.md#supported-input)
+See [supported input](#supported-input)
 for supported reaction forms and limitations.
 
 ## Usage
@@ -27,6 +27,27 @@ the integration routine from your application:
 2. Call `chemistry_input`.
 3. Call `chemistry_ODE_integrate`.
 4. Call `chemistry_finalize` when finished.
+
+## Supported input
+
+CHEMKIN mechanism files and NASA-7 thermodynamic records support
+18-character species names and 256-character reaction records.
+Thermodynamic lookup accepts full-width identifiers with adjacent dates
+and compact headers for short species names.
+
+PLOG requires positive Arrhenius A factors and non-decreasing pressures.
+Terms at the same pressure are summed before logarithmic pressure
+interpolation; pressures outside the table use the nearest endpoint.
+PLOG combined with explicit `REV`, third-body/falloff, `FORD/RORD`, or
+non-integer stoichiometry is rejected.
+
+The analytical Jacobian includes pressure dependence through temperature
+and composition. PLOG disables simplified sparsity.
+
+Activation energies use `8.31446261815324 J/mol/K` and `4.184 J/cal`.
+These conversions change rates relative to older versions that used
+inconsistent constants. Regenerate `cklink` when updating from those
+versions or changing compiler flags or binary byte order.
 
 ## About this version
 
@@ -42,8 +63,27 @@ The supplied Makefile uses Intel oneAPI and Intel MPI:
 
     make
 
-See the [development guide](docs/development.md)
-for build details and supported input.
+Outputs are `ifx/libSpeedCHEM64.a` and `ifx/mod/*.mod`.
+The Makefile lists sources in module dependency order and serializes
+compilation even with `make -j`.
+
+## Source layout
+
+| File | Responsibility |
+| --- | --- |
+| `SCmodule.f90` | Mechanism state, thermodynamics, kinetics, and solver workspace |
+| `chemkin_module.f90`, `SCcklink.f90` | CHEMKIN parsing and binary mechanism loading |
+| `SCconV.f90` | Constant-volume equations and analytical Jacobian |
+| `chemistry_input.f90` | Initialization, solver selection, and integration |
+| `SCallocate.f90` | Allocation and mechanism finalization |
+| `SCsparse*.f90`, `sparse_MPI.f90` | Sparse storage, algebra, and broadcast |
+| `SCbroadcast.f90` | Mechanism broadcast to MPI workers |
+
+Module names can differ from filenames. Keep `working_precision.f90`
+first in the compilation order; `radau5s.f90` is excluded from the build.
+Preserve source encodings and author notices when editing legacy files.
+The current `cklink` format uses magic `SCLKv2  ` and schema 3; changes
+to its binary layout must update both `CK_SCHEMA` and `CK_SCHEMA_EXPECT`.
 
 ## References and license
 
