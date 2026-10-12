@@ -1,18 +1,67 @@
-SpeedCHEM community-maintained source tree
+SpeedCHEM notices
 
 Original SpeedCHEM work:
   Copyright (C) 2010-2013 Federico Perini
   Original project: https://www.federicoperini.info/speedchem
 
-This repository contains modifications made by later contributors, including
-build-system modernization, regression infrastructure, mechanism-lifecycle
-support, extended CHEMKIN string handling, and PLOG support. The Git history
-records the dates and authorship of those modifications.
+The SpeedCHEM-authored source is available under GPL-3.0-or-later;
+see LICENSE. This community-maintained version adds PLOG support,
+build modernization, mechanism-lifecycle support, and extended CHEMKIN
+string handling. Git history records the modification dates and authors.
+This is not the official upstream distribution and does not imply
+endorsement by the original author or the authors named below.
 
-SpeedCHEM-authored portions are available under GPL-3.0-or-later. The full
-license is in LICENSE. Imported numerical solvers and legacy interface code
-retain their own authorship and provenance notices; see THIRD_PARTY_NOTICES.md.
+Bundled source attributions
+--------------------------
+The numerical solvers and chemistry interface carry these source credits:
 
-This repository is not the official upstream SpeedCHEM distribution and does
-not imply endorsement by the original author or by the authors or institutions
-named in imported solver source files.
+- RADAU5 / RODAS (radau5.f90, radaua.f90, rodas.f90):
+  Ernst Hairer and Gerhard Wanner; Solving Ordinary Differential Equations II.
+- ODEPACK / VODE / DDASPK (opkdmain.f90, opkda1.f90, opkda2.f90,
+  vode.f90, ddaspk.f90): Alan C. Hindmarsh and LLNL contributors.
+  VODE also records modifications by Federico Perini; DDASPK records
+  work under a U.S. Department of Energy contract.
+- DVODE_F90 (dvode_f90_m.f90): G. D. Byrne and S. Thompson;
+  source lineage includes VODE, LSODAR, LSODES, LSOD28/MA28, and JACSP.
+- MEBDFSO (MEBDFSO.f90): T. J. Abdulla and J. R. Cash;
+  Fortran 90 conversion credited to Torsten Hennig.
+- GAM (gam.f90, gamsub.f90, gamparam.dat): F. Iavernaro and F. Mazzia;
+  includes routines, comments, and implementation techniques from RADAU5.
+- ROWMAP (rowmap.f90): H. Podhaisky, R. Weiner, and B. A. Schmitt.
+- CHEMKIN/KIVA interface (chemkin_module.f90): CHEMKIN-II interpreter
+  and runtime from a KIVA4 chemistry version, modified by Federico Perini.
+- ICSPLODE / sparse RADAU (radau_sparse.f90):
+  Emanuele Galligani and Federico Perini.
+
+These credits summarize the source headers. Preserve the original author,
+license, laboratory, contract, reference, and modification notices.
+Separate upstream redistribution terms are not fully documented here for
+DVODE_F90, MEBDFSO, GAM, ROWMAP, or the CHEMKIN/KIVA baseline. The root GPL
+notice does not replace independently applicable terms for bundled material.
+
+RADAU5 / RODAS license notice
+----------------------------
+Retain the following notice when redistributing the relevant source or binaries:
+
+Copyright (c) 2004, Ernst Hairer
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.

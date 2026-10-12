@@ -59,7 +59,8 @@ It is not an official upstream release.
 
 ## Building
 
-The supplied Makefile uses Intel oneAPI and Intel MPI:
+The supplied [Makefile](Makefile) uses Intel oneAPI and Intel MPI.
+With the oneAPI environment initialized, build with:
 
     make
 
@@ -91,5 +92,5 @@ Original project: https://www.federicoperini.info/speedchem
 
 Citation: [CITATION.cff](CITATION.cff)
 SpeedCHEM-authored code: [GPL-3.0-or-later](LICENSE).
-Third-party code retains its own terms; some redistribution
-permissions remain unresolved. See [third-party notices](THIRD_PARTY_NOTICES.md).
+Bundled solver author credits, license notices, and provenance notes:
+[NOTICE](NOTICE).
