@@ -52,5 +52,6 @@ for build and test details.
 Original project: https://www.federicoperini.info/speedchem
 
 Citation: [CITATION.cff](CITATION.cff)
-License: [LICENSE](LICENSE)
-Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+SpeedCHEM-authored code: [GPL-3.0-or-later](LICENSE).
+Third-party code and test data retain their own terms; some redistribution
+permissions remain unresolved. See [third-party notices](THIRD_PARTY_NOTICES.md).
