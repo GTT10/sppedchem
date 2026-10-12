@@ -1,5 +1,8 @@
 # PLOG rates and their derivatives
 
+For an introduction in Japanese with the same worked example, see
+[PLOGは圧力ごとの速度定数をつなぐ](guide-ja.md#plogは圧力ごとの速度定数をつなぐ).
+
 PLOG represents a reaction's rate coefficient as a pressure-indexed set
 of Arrhenius expressions. At a specified temperature, SpeedCHEM first
 sums all expressions belonging to each pressure node, then interpolates

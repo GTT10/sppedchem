@@ -1,5 +1,8 @@
 # Governing equations and numerical solvers
 
+For a shorter, informal introduction in Japanese, see
+[SpeedCHEMの中で何が起きているか](guide-ja.md).
+
 SpeedCHEM integrates the temperature and composition of a homogeneous,
 ideal-gas mixture undergoing chemical reactions at fixed density. This
 document derives that initial-value problem and explains how the numerical
