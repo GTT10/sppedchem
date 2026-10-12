@@ -1,55 +1,56 @@
 # SpeedCHEM
 
-[![CI](https://github.com/GTT10/sppedchem/actions/workflows/ci.yml/badge.svg)](https://github.com/GTT10/sppedchem/actions/workflows/ci.yml)
+SpeedCHEM is a Fortran library for gas-phase chemical kinetics.
+It integrates stiff species and temperature equations in
+constant-volume reactors and can be embedded in combustion CFD codes.
 
-Fortran library for stiff gas-phase chemical kinetics with sparse analytical
-Jacobians, constant-volume integration, CHEMKIN/NASA input, PLOG, and MPI.
+Sparse analytical Jacobians reduce the cost of solving large
+reaction mechanisms.
 
-This is a community-maintained version of [Federico Perini’s SpeedCHEM](https://www.federicoperini.info/speedchem), not an official upstream release.
+## Features
 
-## Build
+- CHEMKIN mechanism and NASA thermodynamic input
+- Sparse analytical Jacobians
+- Multiple stiff ODE/DAE solvers
+- Pressure-dependent reactions, including PLOG
+- MPI support for mechanism initialization
 
-Requires Linux, Intel oneAPI `ifx`/`mpiifx`, Intel MPI, and GNU Make.
+See [supported input](docs/development.md#supported-input)
+for supported reaction forms and limitations.
 
-```bash
-source /opt/intel/oneapi/setvars.sh
-make
-```
+## Usage
 
-Outputs: `ifx/libSpeedCHEM64.a` and `ifx/mod/*.mod`.
+Set the mechanism directory, initialize the library, and call
+the integration routine from your application:
 
-## Test
+1. Set `chemistry_setup::mechdir`.
+2. Call `chemistry_input`.
+3. Call `chemistry_ODE_integrate`.
+4. Call `chemistry_finalize` when finished.
 
-```bash
-make test-all          # Bundled regressions, MPI, and OpenMP
-```
+See [example drivers](test/) for complete calling examples.
 
-For the pinned public C3Mech comparison against Cantera:
+## About this version
 
-```bash
-python -m pip install "cantera==3.2.0"
-make test-real-plog
-```
+This repository maintains Federico Perini's SpeedCHEM,
+with added PLOG support and improvements to mechanism loading
+and validation.
 
-See [testing details](docs/development.md#testing) and [supported input](docs/development.md#supported-input).
-Unsupported forms are rejected.
+It is not an official upstream release.
 
-## Use
+## Building
 
-1. Set `chemistry_setup::mechdir` to the mechanism directory.
-2. Call `chemistry_input` to initialize.
-3. Call `chemistry_ODE_integrate` for constant-volume integration.
-4. Call `chemistry_finalize` before loading another mechanism.
+The supplied Makefile uses Intel oneAPI and Intel MPI:
 
-Examples: [test drivers](test/). Internals: [development guide](docs/development.md).
+    make
 
-## Citation and license
+See the [development guide](docs/development.md)
+for build and test details.
 
-Cite the [SpeedCHEM methods paper](https://doi.org/10.1021/ef300747n).
-The [direct/Krylov solver paper](https://doi.org/10.1016/j.combustflame.2013.11.017)
-and mechanism references are listed in [CITATION.cff](CITATION.cff).
+## References and license
 
-SpeedCHEM-authored code: [GPL-3.0-or-later](LICENSE).
-Third-party code and test-data terms, including unresolved mechanism redistribution:
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
+Original project: https://www.federicoperini.info/speedchem
+
+Citation: [CITATION.cff](CITATION.cff)
+License: [LICENSE](LICENSE)
+Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
