@@ -20,8 +20,6 @@ for supported reaction forms and limitations.
 
 ## Theory
 
-- [日本語でざっくり読む：ODE・ソルバー・PLOG](docs/guide-ja.md)
-  — an informal introduction with examples; start here for the main ideas.
 - [Governing equations and numerical solvers](docs/theory.md):
   constant-volume species and energy equations, thermodynamics,
   reaction rates, stiffness, and analytical Jacobians.
